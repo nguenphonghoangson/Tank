@@ -174,6 +174,7 @@ namespace TankGame.NetSpike
         readonly InputCmd[] m_Recent = new InputCmd[3];
         TankState m_Pred;
         Vector3 m_VisOff;
+        TankState m_Prev; bool m_PrevValid;      // state before the last tick, for render interpolation at display rate
         uint m_Seq, m_LastAck;
         byte m_ClientEpoch;
         bool m_Init, m_ClientDead;
@@ -201,9 +202,17 @@ namespace TankGame.NetSpike
                 if (!m_Init) return;
                 m_Acc += Time.unscaledDeltaTime;
                 int guard = 0;
-                while (m_Acc >= SpikeSim.Dt && guard++ < 5) { m_Acc -= SpikeSim.Dt; ClientTick(); }
+                while (m_Acc >= SpikeSim.Dt && guard++ < 5) { m_Acc -= SpikeSim.Dt; m_Prev = m_Pred; m_PrevValid = true; ClientTick(); }
                 m_VisOff = Vector3.Lerp(m_VisOff, Vector3.zero, 1f - Mathf.Exp(-12f * Time.unscaledDeltaTime));
-                Apply(m_Pred, m_Pred.pos + m_VisOff);
+                TankState r = m_Pred;
+                if (m_PrevValid)
+                {
+                    float a = Mathf.Clamp01(m_Acc / SpikeSim.Dt);
+                    r.pos = Vector3.Lerp(m_Prev.pos, m_Pred.pos, a);
+                    r.yaw = Mathf.LerpAngle(m_Prev.yaw, m_Pred.yaw, a);
+                    r.turretYaw = Mathf.LerpAngle(m_Prev.turretYaw, m_Pred.turretYaw, a);
+                }
+                Apply(r, r.pos + m_VisOff);
             }
             else RenderRemote();
         }
