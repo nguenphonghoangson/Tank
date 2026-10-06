@@ -1,19 +1,31 @@
+using System;
 using UnityEngine;
 
 namespace TankGame.Prototype
 {
     public enum PickupKind { Repair, Shield, Speed, Damage, Weapon }
 
+    /// <summary>One possible item for a slot: its look (a child object built by the map) and its effect.</summary>
+    [Serializable]
+    public sealed class PickupVariant
+    {
+        public PickupKind kind;
+        public string label;
+        public Color color;
+        public WeaponDef weapon;
+        public float weight = 1f;
+        public float respawnSeconds = 25f;
+        public GameObject root;
+        public Transform visual;
+    }
+
     /// <summary>
-    /// Item lying on the map: drive over it to use it. Kinds: Repair (heal), Shield (absorbs damage), Speed boost,
-    /// Damage boost, and Weapon (a special weapon with limited shots). Respawns after a while.
+    /// An item slot on the map. Each time it (re)appears it rolls a random item from its variants (weighted), so every
+    /// match and every respawn can differ. Drive over it to use it; a repair kit stays until someone actually needs it.
     /// </summary>
     public sealed class Pickup : MonoBehaviour
     {
-        public PickupKind kind = PickupKind.Repair;
-        public string label = "REPAIR";
-        public Color color = new Color(0.35f, 1f, 0.5f);
-        public float respawnSeconds = 25f;
+        public PickupVariant[] variants;
 
         [Header("Effect values")]
         public int healAmount = 40;
@@ -23,36 +35,59 @@ namespace TankGame.Prototype
         public float speedSeconds = 8f;
         public float damageMultiplier = 1.5f;
         public float damageSeconds = 10f;
-        public WeaponDef weapon;
 
-        public Transform visual;
         public CombatFx fx;
+        public float respawnScale = 1f;
 
-        public bool Available { get; private set; } = true;
-        public event System.Action<Pickup, TankUnit> Collected;
+        // current item (set by Roll)
+        public PickupKind kind { get; private set; }
+        public string label { get; private set; } = "";
+        public Color color { get; private set; } = Color.white;
+        public WeaponDef weapon { get; private set; }
+        public bool Available { get; private set; }
 
-        float m_RespawnAt;
+        public event Action<Pickup, TankUnit> Collected;
+
+        System.Random m_Rng;
+        PickupVariant m_Current;
+        Transform m_Visual;
         Vector3 m_VisualRest;
+        float m_RespawnAt, m_RespawnSeconds = 25f;
 
-        void Awake() { if (visual != null) m_VisualRest = visual.localPosition; }
-
-        public void ResetPickup()
+        /// <summary>Hide the item. With active == false the slot stays empty for a short random while, then rolls.</summary>
+        public void Roll(System.Random rng, bool active)
         {
+            m_Rng = rng ?? m_Rng ?? new System.Random();
+            foreach (PickupVariant v in variants) v.root.SetActive(false);
+            m_Current = null;
+            Available = false;
+            if (!active) { m_RespawnAt = Time.time + 6f + (float)m_Rng.NextDouble() * 18f; return; }
+
+            float total = 0f;
+            foreach (PickupVariant v in variants) total += v.weight;
+            float r = (float)m_Rng.NextDouble() * total;
+            PickupVariant pick = variants[variants.Length - 1];
+            foreach (PickupVariant v in variants) { if (r < v.weight) { pick = v; break; } r -= v.weight; }
+
+            m_Current = pick;
+            kind = pick.kind; label = pick.label; color = pick.color; weapon = pick.weapon; m_RespawnSeconds = pick.respawnSeconds;
+            m_Visual = pick.visual;
+            m_VisualRest = m_Visual.localPosition;
+            pick.root.SetActive(true);
             Available = true;
-            if (visual != null) visual.gameObject.SetActive(true);
         }
 
         void Update()
         {
             if (!Available)
             {
-                if (Time.time >= m_RespawnAt) ResetPickup();
+                if (variants != null && variants.Length > 0 && Time.time >= m_RespawnAt) Roll(m_Rng, true);
                 return;
             }
-            if (visual != null)
+            if (m_Visual != null)
             {
-                visual.Rotate(0f, 120f * Time.deltaTime, 0f, Space.Self);
-                visual.localPosition = m_VisualRest + new Vector3(0f, 0.15f * Mathf.Sin(Time.time * 3f), 0f);
+                m_Visual.Rotate(0f, 120f * Time.deltaTime, 0f, Space.Self);
+                m_Visual.localPosition = m_VisualRest + new Vector3(0f, 0.15f * Mathf.Sin(Time.time * 3f), 0f);
             }
         }
 
@@ -63,14 +98,15 @@ namespace TankGame.Prototype
             if (t == null || t.IsDead) return;
             if (!Apply(t)) return;
 
+            PickupVariant used = m_Current;
             Available = false;
-            m_RespawnAt = Time.time + respawnSeconds;
-            if (visual != null) visual.gameObject.SetActive(false);
+            m_RespawnAt = Time.time + m_RespawnSeconds * respawnScale * (0.8f + 0.4f * (float)m_Rng.NextDouble());
+            used.root.SetActive(false);
             if (fx != null) fx.SpawnPickup(transform.position + Vector3.up * 0.6f);
             Collected?.Invoke(this, t);
         }
 
-        /// <summary>Returns false when the item would be wasted (a repair kit stays until someone needs it).</summary>
+        /// <summary>Returns false when the item would be wasted.</summary>
         bool Apply(TankUnit t)
         {
             switch (kind)

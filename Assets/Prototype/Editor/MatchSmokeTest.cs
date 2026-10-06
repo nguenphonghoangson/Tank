@@ -20,7 +20,7 @@ namespace TankGame.Prototype.Editor
         const string KActive = "TankMatch.Smoke.Active";
         const string KPrevScene = "TankMatch.Smoke.PrevScene";
         const string ScenePath = "Assets/Scenes/Match_Prototype.unity";
-        const float MatchSeconds = 90f;
+        const float MatchSeconds = 100f;
 
         struct Due { public double time; public string name; }
 
@@ -47,6 +47,10 @@ namespace TankGame.Prototype.Editor
         static bool s_RevertedToPrimary, s_FlagDecayed;
         static float s_SpeedMult, s_DamageMult, s_FlagDecayAt = -1f;
         static double s_PhaseT;
+        static int s_MaxPhase, s_CoresMin, s_PickState = -1, s_PickScale = -1, s_PickCores = -1, s_ItemKinds;
+        static string s_OffersA, s_OffersB, s_ItemsA, s_ItemsB;
+        static bool s_WinnerTopScore, s_FinalMultiplier;
+        static float s_IncomeTotal;
         static int s_Phase;
         static MatchMode[] s_Modes = { MatchMode.TwoTeams3v2, MatchMode.ThreeTeams221, MatchMode.Solo5 };
 
@@ -91,7 +95,7 @@ namespace TankGame.Prototype.Editor
             Directory.CreateDirectory(s_Dir);
             s_Step = 0; s_T0 = Time.realtimeSinceStartupAsDouble; s_StartFrame = Time.frameCount;
             s_Due.Clear(); s_Msgs.Clear(); s_Presets.Clear();
-            s_Errors = 0; s_PresetIndex = 0; s_ContestedFrames = 0; s_Frames = 0; s_FirstCaptureAt = -1f; s_MaxShare = 0f; s_ReloadSeen = false; s_PickupConsumed = false; s_FlagDecayed = false; s_FlagDecayAt = -1f;
+            s_Errors = 0; s_PresetIndex = 0; s_ContestedFrames = 0; s_Frames = 0; s_MaxPhase = 0; s_FirstCaptureAt = -1f; s_MaxShare = 0f; s_ReloadSeen = false; s_PickupConsumed = false; s_FlagDecayed = false; s_FlagDecayAt = -1f;
             s_ModelResult = ModelSelfTest();
             Application.logMessageReceived += OnLog;
             EditorApplication.update += Tick;
@@ -200,6 +204,7 @@ namespace TankGame.Prototype.Editor
                 case 1: // let the match run to its end
                 {
                     s_Frames++;
+                    s_MaxPhase = Mathf.Max(s_MaxPhase, s_Match.PhaseIndex);
                     foreach (ControlPoint cp in s_Match.Layout.controlPoints)
                     {
                         if (cp.Contested) { s_ContestedFrames++; break; }
@@ -209,13 +214,45 @@ namespace TankGame.Prototype.Editor
                         foreach (ControlPoint cp in s_Match.Layout.controlPoints) if (cp.Owner >= 0) s_FirstCaptureAt = s_Match.Elapsed;
                     if (s_Match.State == MatchManager.MatchState.Ended)
                     {
+                        s_CoresMin = int.MaxValue;
+                        foreach (PlayerStats ps in s_Match.Players) s_CoresMin = Mathf.Min(s_CoresMin, ps.cores);
+                        int bestTeam = 0;
+                        for (int t = 1; t < s_Match.AverageShare.Length; t++) if (s_Match.TeamScore(t) > s_Match.TeamScore(bestTeam)) bestTeam = t;
+                        s_WinnerTopScore = s_Match.IsDraw || s_Match.WinnerTeam == bestTeam || s_Match.TeamScore(s_Match.WinnerTeam) == s_Match.TeamScore(bestTeam);
+                        s_FinalMultiplier = Mathf.Approximately(s_Match.phases[s_Match.phases.Length - 1].scoreMultiplier, 2f);
+                        s_IncomeTotal = 0f; foreach (float inc in s_Match.TeamIncome) s_IncomeTotal += inc;
                         WriteMain();
-                        s_Step = 10;
+                        s_Step = 30;
                     }
+                    break;
+                }
+                case 30: // same seed => same core offers and same item roll; different seed => different
+                {
+                    s_Match.allBots = true; s_Match.coresEnabled = true; s_Match.seed = 1234;
+                    s_Match.StartMatch(MatchConfig.Preset(MatchMode.TwoTeams2v2)); s_OffersA = Offers(); s_ItemsA = Items();
+                    s_Match.StartMatch(MatchConfig.Preset(MatchMode.TwoTeams2v2)); s_OffersB = Offers(); s_ItemsB = Items();
+                    var kinds = new System.Collections.Generic.HashSet<string>();
+                    foreach (Pickup pk in s_Match.Layout.pickups) if (pk.Available) kinds.Add(pk.label);
+                    s_ItemKinds = kinds.Count;
+                    s_Match.seed = 0;
+                    s_Step = 31;
+                    break;
+                }
+                case 31: // a human player: the match freezes for the pick and resumes right after it
+                {
+                    s_Match.allBots = false; s_Match.coresEnabled = true;
+                    s_Match.StartMatch(MatchConfig.Preset(MatchMode.TwoTeams2v2));
+                    s_PickState = (int)s_Match.State;                         // expect Picking (0)
+                    s_PickScale = Mathf.RoundToInt(Time.timeScale * 10f);       // expect 0
+                    s_Match.PickCore(1);
+                    s_PickCores = s_Match.Tanks[s_Match.LocalSlot].Cores.Count;   // expect 1
+                    s_Match.allBots = true; s_Match.coresEnabled = false;
+                    s_Step = 10;
                     break;
                 }
                 case 10: // mechanics: dash, magazine/reload, repair pickup on a bot-free 2v2
                 {
+                    s_Match.coresEnabled = false;
                     s_Match.StartMatch(MatchConfig.Preset(MatchMode.TwoTeams2v2));
                     s_Rig.target = s_Anchor.transform;
                     foreach (BotBrain b in s_Match.Bots) if (b != null) b.enabled = false;
@@ -362,9 +399,24 @@ namespace TankGame.Prototype.Editor
             }
         }
 
+        static string Offers()
+        {
+            var sb = new StringBuilder();
+            foreach (CoreDef[] o in s_Match.Offers) { foreach (CoreDef c in o) sb.Append(c.id).Append(','); sb.Append('|'); }
+            return sb.ToString();
+        }
+
+        static string Items()
+        {
+            var sb = new StringBuilder();
+            foreach (Pickup p in s_Match.Layout.pickups) sb.Append(p.Available ? p.label : "-").Append(',');
+            return sb.ToString();
+        }
+
         static void StartPreset(double now)
         {
             s_Match.matchSeconds = 120f;
+            s_Match.coresEnabled = true;
             s_Match.StartMatch(MatchConfig.Preset(s_Modes[s_PresetIndex]));
             s_Rig.target = s_Anchor.transform;
             s_StepT = now;
@@ -422,7 +474,12 @@ namespace TankGame.Prototype.Editor
             EditorApplication.update -= Tick;
             var sb = new StringBuilder();
             sb.Append("{\n  \"failure\": ").Append(failure == null ? "null" : "\"" + failure + "\"").Append(",\n  \"capture_model\": \"").Append(s_ModelResult)
-              .Append("\",\n  \"mechanics\": {\"dash_distance_m\":").Append(F(s_DashDistance)).Append(",\"dash_cooldown_left_s\":").Append(F(s_DashCooldown))
+              .Append("\",\n  \"phases\": {\"max_phase_index\":").Append(s_MaxPhase).Append(",\"cores_picked_min_per_player\":").Append(s_CoresMin)
+              .Append(",\"winner_has_top_score\":").Append(s_WinnerTopScore ? "true" : "false").Append(",\"final_phase_x2\":").Append(s_FinalMultiplier ? "true" : "false")
+              .Append(",\"flag_income_total\":").Append(F(s_IncomeTotal)).Append("},\n  \"randomness\": {\"same_seed_same_offers\":").Append(s_OffersA == s_OffersB ? "true" : "false")
+              .Append(",\"same_seed_same_items\":").Append(s_ItemsA == s_ItemsB ? "true" : "false").Append(",\"item_types_present\":").Append(s_ItemKinds)
+              .Append("},\n  \"human_pick\": {\"state_while_picking\":").Append(s_PickState).Append(",\"timescale_x10\":").Append(s_PickScale).Append(",\"cores_after_pick\":").Append(s_PickCores)
+              .Append("},\n  \"mechanics\": {\"dash_distance_m\":").Append(F(s_DashDistance)).Append(",\"dash_cooldown_left_s\":").Append(F(s_DashCooldown))
               .Append(",\"shots_before_reload\":").Append(s_ShotsBeforeReload).Append(",\"ammo_when_reload_started\":").Append(s_AmmoAtReload).Append(",\"reload_seconds\":").Append(F(s_ReloadSeconds))
               .Append(",\"ammo_after_reload\":").Append(s_AmmoAfterReload).Append(",\"hp_before_pickup\":").Append(s_HpBefore).Append(",\"hp_after_pickup\":").Append(s_HpAfter)
               .Append(",\"pickup_consumed\":").Append(s_PickupConsumed ? "true" : "false").Append("},\n  \"drive\": {\"top_speed_mps\":").Append(F(s_TopSpeed))

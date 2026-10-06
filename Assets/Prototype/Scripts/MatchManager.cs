@@ -5,13 +5,14 @@ using UnityEngine.InputSystem;
 namespace TankGame.Prototype
 {
     /// <summary>
-    /// Runs one match: loads the map, spawns the participants, steps the control points, keeps territory and score,
-    /// respawns the dead and decides the winner. Territory control decides the match; score only ranks players.
-    /// Prototype scope: no networking, no matchmaking. A real flow would call StartMatch(config) from a lobby.
+    /// Runs one match: loads the map, spawns the participants and plays four phases. Each phase starts with a core pick
+    /// (a random offer of three per player, the match pauses for the human pick), then runs for a fixed time. Flags give
+    /// score every second to the team holding them, kills/captures/assists/defense/contests add to the total, the last
+    /// phase is worth more and plays faster. Highest total score wins. Prototype scope: no networking.
     /// </summary>
     public sealed class MatchManager : MonoBehaviour
     {
-        public enum MatchState { Playing, Ended }
+        public enum MatchState { Picking, Playing, Ended }
 
         [Header("Setup")]
         public MapDef map;
@@ -21,15 +22,25 @@ namespace TankGame.Prototype
         public CameraRig cameraRig;
         public PlayerTankInput localInput;
         public MatchMode mode = MatchMode.TwoTeams2v2;
-        public bool allBots;     // test switch: the local player is driven by a bot too
+        public bool allBots;             // test switch: the local player is driven by a bot too
+        public bool coresEnabled = true; // test switch: skip core picking
+        public int seed;                 // 0 = random every match; any other value makes offers and items reproducible
 
         [Header("Rules")]
-        public float matchSeconds = 240f;
-        public float respawnSeconds = 3f;
+        public float matchSeconds = 240f;          // total play time, split evenly over the phases
         public float captureSeconds = 6f;
-        public float dominationSeconds = 25f;
-        public float unattendedDecaySeconds = 45f;   // an owned point with no defender loses its hold over this long
+        public float unattendedDecaySeconds = 45f;
+        public float dominationSeconds = 0f;       // > 0 ends the match when one team holds every flag this long (off by default)
+        public float flagIncomePerSecond = 3f;     // score per second per owned flag (times its weight and the phase multiplier)
+        public float coreChoiceSeconds = 15f;
         public ScoreConfig score = new ScoreConfig();
+        public PhaseDef[] phases =
+        {
+            new PhaseDef { name = "Phase 1", scoreMultiplier = 1f,    tempo = 1f,    respawnSeconds = 3f,   itemRespawnScale = 1f },
+            new PhaseDef { name = "Phase 2", scoreMultiplier = 1f,    tempo = 1f,    respawnSeconds = 3f,   itemRespawnScale = 1f },
+            new PhaseDef { name = "Phase 3", scoreMultiplier = 1.25f, tempo = 1.15f, respawnSeconds = 2.5f, itemRespawnScale = 0.8f },
+            new PhaseDef { name = "FINAL",   scoreMultiplier = 2f,    tempo = 1.5f,  respawnSeconds = 1.5f, itemRespawnScale = 0.5f },
+        };
 
         public MatchState State { get; private set; }
         public MatchConfig Config { get; private set; }
@@ -39,8 +50,12 @@ namespace TankGame.Prototype
         public BotBrain[] Bots { get; private set; }
         public float TimeLeft { get; private set; }
         public float Elapsed { get; private set; }
+        public int PhaseIndex { get; private set; }
+        public float PhaseTimeLeft { get; private set; }
+        public PhaseDef CurrentPhase => phases[Mathf.Clamp(PhaseIndex, 0, phases.Length - 1)];
         public float[] CurrentShare { get; private set; }
         public float[] AverageShare { get; private set; }
+        public float[] TeamIncome { get; private set; }
         public float NeutralShare { get; private set; }
         public int WinnerTeam { get; private set; } = -1;
         public bool IsDraw { get; private set; }
@@ -49,16 +64,24 @@ namespace TankGame.Prototype
         public float DominationTimer { get; private set; }
         public int LocalSlot { get; private set; } = -1;
         public int MatchesStarted { get; private set; }
+        public CoreDef[][] Offers { get; private set; }
+        public float PickTimeLeft => Mathf.Max(0f, m_PickEnds - Time.unscaledTime);
+
+        /// <summary>The three cores the local player may choose from right now (null when not picking or already picked).</summary>
+        public CoreDef[] LocalOffers => State == MatchState.Picking && LocalSlot >= 0 && !allBots && !m_Picked[LocalSlot] ? Offers[LocalSlot] : null;
 
         public const int LogSize = 6;
         public readonly string[] Log = new string[LogSize];
         public readonly float[] LogTime = new float[LogSize];
 
         GameObject m_MapInstance;
-        float[] m_ControlSeconds, m_RespawnAt;
+        float[] m_ControlSeconds, m_RespawnAt, m_Power;
         int[] m_Counts;
         uint[] m_Presence;
+        bool[] m_Picked;
         Color[] m_TeamColors;
+        System.Random m_Rng;
+        float m_PickEnds;
         int m_LogHead;
 
         void Start()
@@ -69,12 +92,15 @@ namespace TankGame.Prototype
         public Color TeamColor(int team) { return m_TeamColors[team]; }
         public string TeamName(int team) { return Config.Teams[team].name; }
 
-        public int TeamScore(int team)
+        public int CombatScore(int team)
         {
             int s = 0;
             for (int i = 0; i < Players.Length; i++) if (Players[i].team == team) s += Players[i].score;
             return s;
         }
+
+        /// <summary>Everything the team has earned: player awards plus flag income.</summary>
+        public int TeamScore(int team) { return CombatScore(team) + Mathf.RoundToInt(TeamIncome[team]); }
 
         public float LocalRespawnIn => LocalSlot >= 0 && Tanks[LocalSlot].IsDead ? Mathf.Max(0f, m_RespawnAt[LocalSlot] - Time.time) : 0f;
 
@@ -85,16 +111,20 @@ namespace TankGame.Prototype
             if (!config.Validate(out string error)) { Debug.LogError("Invalid match config: " + error); return; }
             Teardown();
             Time.timeScale = 1f;
+            if (fx != null) { fx.Paused = false; fx.CancelHitStop(); }
             Config = config;
             MatchesStarted++;
+            m_Rng = seed != 0 ? new System.Random(seed) : new System.Random();
 
             int teamCount = config.Teams.Count, n = config.Participants.Count;
             m_TeamColors = new Color[teamCount];
             for (int t = 0; t < teamCount; t++) m_TeamColors[t] = config.Teams[t].color;
             m_Counts = new int[teamCount];
+            m_Power = new float[teamCount];
             m_ControlSeconds = new float[teamCount];
             CurrentShare = new float[teamCount];
             AverageShare = new float[teamCount];
+            TeamIncome = new float[teamCount];
             NeutralShare = 1f;
             Elapsed = 0f;
             TimeLeft = matchSeconds;
@@ -105,12 +135,19 @@ namespace TankGame.Prototype
             Layout = m_MapInstance.GetComponent<MapLayout>();
             m_Presence = new uint[Layout.controlPoints.Length];
             foreach (ControlPoint cp in Layout.controlPoints) cp.Init(m_TeamColors, captureSeconds, unattendedDecaySeconds);
-            foreach (Pickup p in Layout.pickups) { p.fx = fx; p.ResetPickup(); p.Collected += OnPickupCollected; }
+            foreach (Pickup p in Layout.pickups)
+            {
+                p.fx = fx;
+                p.Collected += OnPickupCollected;
+                p.Roll(m_Rng, m_Rng.NextDouble() < 0.7);     // some slots start empty so the map never looks the same twice
+            }
 
             Players = new PlayerStats[n];
             Tanks = new TankUnit[n];
             Bots = new BotBrain[n];
             m_RespawnAt = new float[n];
+            m_Picked = new bool[n];
+            Offers = new CoreDef[n][];
             LocalSlot = -1;
             var perTeam = new int[teamCount];
             for (int i = 0; i < n; i++)
@@ -156,6 +193,7 @@ namespace TankGame.Prototype
 
             State = MatchState.Playing;
             AddLog("Match start: " + (config.IsSolo ? "free-for-all" : config.Teams.Count + " teams") + ", " + n + " players");
+            BeginPhase(0);
         }
 
         void Teardown()
@@ -169,6 +207,73 @@ namespace TankGame.Prototype
         }
 
         void OnDestroy() { Teardown(); }
+
+        // ------------------------------------------------------------------ phases and core picking
+
+        void BeginPhase(int index)
+        {
+            PhaseIndex = index;
+            PhaseDef ph = CurrentPhase;
+            PhaseTimeLeft = matchSeconds / phases.Length;
+            foreach (ControlPoint cp in Layout.controlPoints)
+            {
+                cp.Model.CaptureSeconds = captureSeconds / ph.tempo;
+                cp.Model.DecaySeconds = unattendedDecaySeconds / ph.tempo;
+            }
+            foreach (Pickup p in Layout.pickups) p.respawnScale = ph.itemRespawnScale;
+            AddLog(ph.name + (ph.scoreMultiplier > 1f ? "  score x" + ph.scoreMultiplier.ToString("0.##") : "") + (ph.tempo > 1f ? "  faster" : ""));
+
+            if (!coresEnabled) { State = MatchState.Playing; return; }
+
+            // three random cores per player (never one the tank already has); bots choose at once
+            for (int i = 0; i < Tanks.Length; i++)
+            {
+                var pool = new System.Collections.Generic.List<CoreDef>(CoreLibrary.All);
+                foreach (CoreDef owned in Tanks[i].Cores) pool.Remove(owned);
+                for (int k = pool.Count - 1; k > 0; k--) { int j = m_Rng.Next(k + 1); CoreDef tmp = pool[k]; pool[k] = pool[j]; pool[j] = tmp; }
+                Offers[i] = pool.GetRange(0, Mathf.Min(3, pool.Count)).ToArray();
+                m_Picked[i] = false;
+                if (Bots[i] != null) Pick(i, m_Rng.Next(Offers[i].Length));
+            }
+            if (AllPicked()) { State = MatchState.Playing; return; }
+
+            // waiting for the human: the match is frozen until they choose (or the countdown ends)
+            State = MatchState.Picking;
+            m_PickEnds = Time.unscaledTime + coreChoiceSeconds;
+            if (fx != null) { fx.CancelHitStop(); fx.Paused = true; }
+            Time.timeScale = 0f;
+        }
+
+        bool AllPicked()
+        {
+            for (int i = 0; i < m_Picked.Length; i++) if (!m_Picked[i]) return false;
+            return true;
+        }
+
+        void Pick(int slot, int offerIndex)
+        {
+            if (m_Picked[slot]) return;
+            CoreDef c = Offers[slot][Mathf.Clamp(offerIndex, 0, Offers[slot].Length - 1)];
+            Tanks[slot].AddCore(c);
+            Players[slot].cores++;
+            m_Picked[slot] = true;
+            if (slot == LocalSlot || Players[slot].isLocal) AddLog("You took " + c.name);
+        }
+
+        /// <summary>Called by the HUD when the local player chooses one of the offered cores.</summary>
+        public void PickCore(int offerIndex)
+        {
+            if (State != MatchState.Picking || LocalSlot < 0 || m_Picked[LocalSlot]) return;
+            Pick(LocalSlot, offerIndex);
+            if (AllPicked()) EndPicking();
+        }
+
+        void EndPicking()
+        {
+            State = MatchState.Playing;
+            Time.timeScale = 1f;
+            if (fx != null) fx.Paused = false;
+        }
 
         // ------------------------------------------------------------------ update
 
@@ -184,16 +289,33 @@ namespace TankGame.Prototype
                     StartMatch(MatchConfig.Preset(mode));
                 }
             }
+
+            if (State == MatchState.Picking)
+            {
+                if (Time.unscaledTime >= m_PickEnds)
+                {
+                    for (int i = 0; i < m_Picked.Length; i++) if (!m_Picked[i]) Pick(i, m_Rng.Next(Offers[i].Length));
+                    EndPicking();
+                }
+                return;
+            }
             if (State != MatchState.Playing) return;
 
             float dt = Time.deltaTime;
             Elapsed += dt;
             TimeLeft -= dt;
+            PhaseTimeLeft -= dt;
             StepPoints(dt);
             StepTerritory(dt);
             StepRespawns();
-            if (State == MatchState.Playing && TimeLeft <= 0f) End("Time up", -1);
+            if (State == MatchState.Playing && PhaseTimeLeft <= 0f)
+            {
+                if (PhaseIndex + 1 < phases.Length) BeginPhase(PhaseIndex + 1);
+                else End("Time up", -1);
+            }
         }
+
+        int Pts(float basePoints) { return Mathf.RoundToInt(basePoints * CurrentPhase.scoreMultiplier); }
 
         void StepPoints(float dt)
         {
@@ -202,21 +324,23 @@ namespace TankGame.Prototype
             {
                 ControlPoint cp = points[p];
                 Array.Clear(m_Counts, 0, m_Counts.Length);
+                Array.Clear(m_Power, 0, m_Power.Length);
                 uint mask = 0;
                 for (int i = 0; i < Tanks.Length; i++)
                 {
                     TankUnit t = Tanks[i];
                     if (t.IsDead || !cp.Contains(t.transform.position)) continue;
                     m_Counts[t.team]++;
+                    m_Power[t.team] += t.Mods.captureMult;
                     mask |= 1u << i;
                 }
                 m_Presence[p] = mask;
 
-                CapturePointModel.Change ch = cp.Step(dt, m_Counts, out int team);
+                CapturePointModel.Change ch = cp.Step(dt, m_Counts, m_Power, out int team);
                 switch (ch)
                 {
                     case CapturePointModel.Change.Captured:
-                        AwardPresent(mask, team, score.capture, 0);
+                        AwardPresent(mask, team, Pts(score.capture));
                         AddLog(TeamName(team) + " captured " + cp.label);
                         break;
                     case CapturePointModel.Change.Decayed:
@@ -229,7 +353,7 @@ namespace TankGame.Prototype
                         if (cp.Owner >= 0)
                         {
                             for (int i = 0; i < Tanks.Length; i++)
-                                if ((mask & (1u << i)) != 0 && Players[i].team != cp.Owner) { Players[i].score += score.contest; Players[i].contests++; }
+                                if ((mask & (1u << i)) != 0 && Players[i].team != cp.Owner) { Players[i].score += Pts(score.contest); Players[i].contests++; }
                             AddLog(cp.label + " is contested");
                         }
                         break;
@@ -237,7 +361,7 @@ namespace TankGame.Prototype
             }
         }
 
-        void AwardPresent(uint mask, int team, int points, int kind)
+        void AwardPresent(uint mask, int team, int points)
         {
             for (int i = 0; i < Tanks.Length; i++)
             {
@@ -255,7 +379,13 @@ namespace TankGame.Prototype
             for (int p = 0; p < points.Length; p++)
             {
                 total += points[p].weight;
-                if (points[p].Owner >= 0) CurrentShare[points[p].Owner] += points[p].weight; else unowned += points[p].weight;
+                if (points[p].Owner >= 0)
+                {
+                    CurrentShare[points[p].Owner] += points[p].weight;
+                    // the flag pays its owner every second; later phases pay more
+                    TeamIncome[points[p].Owner] += flagIncomePerSecond * points[p].weight * CurrentPhase.scoreMultiplier * dt;
+                }
+                else unowned += points[p].weight;
             }
             if (total <= 0f) return;
             for (int t = 0; t < CurrentShare.Length; t++)
@@ -266,7 +396,7 @@ namespace TankGame.Prototype
             }
             NeutralShare = unowned / total;
 
-            // domination: one team holds every point without a break
+            if (dominationSeconds <= 0f) return;
             int dom = points[0].Owner;
             for (int p = 1; p < points.Length && dom >= 0; p++) if (points[p].Owner != dom) dom = -1;
             if (dom >= 0 && dom == DominatingTeam) DominationTimer += dt;
@@ -290,23 +420,23 @@ namespace TankGame.Prototype
         {
             PlayerStats v = Players[victim.slot];
             v.deaths++;
-            m_RespawnAt[victim.slot] = Time.time + respawnSeconds;
+            m_RespawnAt[victim.slot] = Time.time + CurrentPhase.respawnSeconds;
 
             TankUnit killer = victim.Killer;
-            if (killer != null && killer.team != victim.team && State == MatchState.Playing)
+            if (killer != null && killer.team != victim.team && State != MatchState.Ended)
             {
                 PlayerStats k = Players[killer.slot];
                 k.kills++;
-                k.score += score.kill;
+                k.score += Pts(score.kill * killer.Mods.killScoreMult);
                 for (int s = 0; s < Players.Length; s++)
-                    if ((victim.AssistMask & (1 << s)) != 0 && Players[s].team != victim.team) { Players[s].assists++; Players[s].score += score.assist; }
+                    if ((victim.AssistMask & (1 << s)) != 0 && Players[s].team != victim.team) { Players[s].assists++; Players[s].score += Pts(score.assist * Tanks[s].Mods.killScoreMult); }
 
                 // defense: the victim died at a point the killer's team owns
                 foreach (ControlPoint cp in Layout.controlPoints)
                     if (cp.Owner == killer.team && cp.Contains(victim.transform.position, score.defenseRadiusExtra))
                     {
                         k.defenses++;
-                        k.score += score.defense;
+                        k.score += Pts(score.defense);
                         break;
                     }
                 AddLog(k.name + " destroyed " + v.name);
@@ -322,29 +452,30 @@ namespace TankGame.Prototype
         void End(string reason, int forcedWinner)
         {
             State = MatchState.Ended;
+            Time.timeScale = 1f;
             EndReason = reason;
             int best = -1;
             if (forcedWinner >= 0) best = forcedWinner;
             else
             {
-                float top = -1f; bool tie = false;
-                for (int t = 0; t < AverageShare.Length; t++)
+                // highest total score wins; equal scores fall back to who held more flags over the match, then a draw
+                int top = int.MinValue; bool tie = false;
+                for (int t = 0; t < TeamIncome.Length; t++)
                 {
-                    if (AverageShare[t] > top + 0.0005f) { top = AverageShare[t]; best = t; tie = false; }
-                    else if (Mathf.Abs(AverageShare[t] - top) <= 0.0005f) tie = true;
+                    int sc = TeamScore(t);
+                    if (sc > top) { top = sc; best = t; tie = false; }
+                    else if (sc == top) tie = true;
                 }
                 if (tie)
                 {
-                    // equal control: combat score decides; still equal means a draw
-                    int bestScore = -1; bool scoreTie = false; best = -1;
-                    for (int t = 0; t < AverageShare.Length; t++)
+                    float topShare = -1f; bool shareTie = false; best = -1;
+                    for (int t = 0; t < TeamIncome.Length; t++)
                     {
-                        if (Mathf.Abs(AverageShare[t] - top) > 0.0005f) continue;
-                        int sc = TeamScore(t);
-                        if (sc > bestScore) { bestScore = sc; best = t; scoreTie = false; }
-                        else if (sc == bestScore) scoreTie = true;
+                        if (TeamScore(t) != top) continue;
+                        if (AverageShare[t] > topShare + 0.0005f) { topShare = AverageShare[t]; best = t; shareTie = false; }
+                        else if (Mathf.Abs(AverageShare[t] - topShare) <= 0.0005f) shareTie = true;
                     }
-                    if (scoreTie) best = -1;
+                    if (shareTie) best = -1;
                 }
             }
             WinnerTeam = best;
@@ -390,8 +521,8 @@ namespace TankGame.Prototype
                     if (d < 3.5f) occupied = true;                     // never spawn on top of a living tank
                     if (t.team != team) nearest = Mathf.Min(nearest, d);
                 }
-                float score = occupied ? nearest - 1000f : nearest;
-                if (score > bestDist) { bestDist = score; best = p.position; }
+                float sc = occupied ? nearest - 1000f : nearest;
+                if (sc > bestDist) { bestDist = sc; best = p.position; }
             }
             return best;
         }

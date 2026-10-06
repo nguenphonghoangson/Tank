@@ -18,7 +18,8 @@ namespace TankGame.Prototype
             Vector2 mv = unit.Command.Move;
             Vector3 dir = mv.sqrMagnitude > 0.01f ? new Vector3(mv.x, 0f, mv.y).normalized : unit.transform.forward;
             unit.StartDash(dir, speed, duration);
-            CooldownRemaining = cooldown;
+            CurrentCooldown = cooldown * unit.Mods.dashCooldownMult;
+            CooldownRemaining = CurrentCooldown;
         }
     }
 }

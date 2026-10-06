@@ -12,7 +12,8 @@ namespace TankGame.Prototype
         public float cooldown = 6f;
 
         public float CooldownRemaining { get; protected set; }
-        public float Ready01 => cooldown > 0f ? 1f - Mathf.Clamp01(CooldownRemaining / cooldown) : 1f;
+        public float CurrentCooldown { get; protected set; }
+        public float Ready01 => CurrentCooldown > 0f ? 1f - Mathf.Clamp01(CooldownRemaining / CurrentCooldown) : 1f;
 
         public abstract void Tick(TankUnit unit, bool pressed);
         public virtual void ResetSkill() { CooldownRemaining = 0f; }

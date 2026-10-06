@@ -66,6 +66,11 @@ namespace TankGame.Prototype
         Pool<PooledFx> m_Muzzle, m_Impact, m_Hit, m_Explosion, m_Pickup, m_Dash;
         float m_HitStopUntil, m_NextHitStopAt;
 
+        /// <summary>While paused (core selection) hit-stop must not touch the time scale.</summary>
+        public bool Paused { get; set; }
+
+        public void CancelHitStop() { m_HitStopUntil = 0f; }
+
         void Awake()
         {
             m_Projectiles = new Pool<Projectile>(projectilePrefab, transform, 24);
@@ -84,6 +89,7 @@ namespace TankGame.Prototype
 
         void Update()
         {
+            if (Paused) return;
             if (m_HitStopUntil > 0f && Time.unscaledTime >= m_HitStopUntil)
             {
                 m_HitStopUntil = 0f;
@@ -130,7 +136,7 @@ namespace TankGame.Prototype
         /// <summary>Freeze-frame: a short near-stop of game time. Longer for kills than for hits.</summary>
         public void HitStop(float seconds)
         {
-            if (seconds <= 0f) return;
+            if (seconds <= 0f || Paused) return;
             // at most one freeze every 0.4 s, so fast weapons never turn into a slideshow
             if (Time.unscaledTime < m_NextHitStopAt) return;
             m_NextHitStopAt = Time.unscaledTime + 0.4f;

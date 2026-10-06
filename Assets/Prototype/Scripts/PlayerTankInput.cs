@@ -21,6 +21,7 @@ namespace TankGame.Prototype
             Keyboard kb = Keyboard.current;
             Mouse mouse = Mouse.current;
             if (kb == null || mouse == null || cam == null) return;
+            if (Time.timeScale == 0f) { tank.Command = default; return; }     // core selection pauses the match
 
             float x = (kb.dKey.isPressed || kb.rightArrowKey.isPressed ? 1f : 0f) - (kb.aKey.isPressed || kb.leftArrowKey.isPressed ? 1f : 0f);
             float z = (kb.wKey.isPressed || kb.upArrowKey.isPressed ? 1f : 0f) - (kb.sKey.isPressed || kb.downArrowKey.isPressed ? 1f : 0f);

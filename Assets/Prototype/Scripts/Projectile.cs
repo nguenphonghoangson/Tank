@@ -75,8 +75,14 @@ namespace TankGame.Prototype
                 transform.position = point;
                 // damage and impact effects happen on the same frame as the hit
                 s_SplashStamp++;
-                if (bestTank != null) { bestTank.SplashStamp = s_SplashStamp; bestTank.TakeDamage(m_Damage, point, m_Dir, m_Owner); }
-                if (m_Weapon.splashRadius > 0f) Splash(point);
+                if (bestTank != null)
+                {
+                    bestTank.SplashStamp = s_SplashStamp;
+                    bestTank.TakeDamage(m_Damage, point, m_Dir, m_Owner);
+                    if (m_Owner.Mods.lifesteal > 0f) m_Owner.Heal(Mathf.CeilToInt(m_Damage * m_Owner.Mods.lifesteal), true);
+                }
+                float radius = m_Weapon.splashRadius + m_Owner.Mods.splashBonus;
+                if (radius > 0f) Splash(point, radius, Mathf.Max(m_Weapon.splashDamageFactor, m_Owner.Mods.splashBonus > 0f ? 0.35f : 0f));
                 m_Fx.SpawnImpact(point, normal, bestTank != null);
                 m_Fx.ReleaseProjectile(this);
                 return;
@@ -87,17 +93,17 @@ namespace TankGame.Prototype
             if (m_Age >= m_Life) m_Fx.ReleaseProjectile(this);
         }
 
-        void Splash(Vector3 point)
+        void Splash(Vector3 point, float radius, float factor)
         {
-            int n = Physics.OverlapSphereNonAlloc(point, m_Weapon.splashRadius, s_Splash, ~0, QueryTriggerInteraction.Ignore);
+            int n = Physics.OverlapSphereNonAlloc(point, radius, s_Splash, ~0, QueryTriggerInteraction.Ignore);
             for (int i = 0; i < n; i++)
             {
                 TankUnit t = s_Splash[i].GetComponentInParent<TankUnit>();
                 if (t == null || t.IsDead || t.team == m_Owner.team || t.SplashStamp == s_SplashStamp) continue;
                 t.SplashStamp = s_SplashStamp;
                 Vector3 closest = s_Splash[i].ClosestPoint(point);
-                float falloff = 1f - Mathf.Clamp01(Vector3.Distance(point, closest) / m_Weapon.splashRadius);
-                int dmg = Mathf.RoundToInt(m_Damage * m_Weapon.splashDamageFactor * falloff);
+                float falloff = 1f - Mathf.Clamp01(Vector3.Distance(point, closest) / radius);
+                int dmg = Mathf.RoundToInt(m_Damage * factor * falloff);
                 if (dmg > 0) t.TakeDamage(dmg, closest, (t.transform.position - point).normalized, m_Owner);
             }
         }

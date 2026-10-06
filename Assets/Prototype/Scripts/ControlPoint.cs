@@ -28,7 +28,10 @@ namespace TankGame.Prototype
         }
 
         /// <param name="teamCounts">living tanks inside the zone, per team index</param>
-        public Change Tick(float dt, int[] teamCounts, out int team)
+        public Change Tick(float dt, int[] teamCounts, out int team) { return Tick(dt, teamCounts, null, out team); }
+
+        /// <param name="teamPower">optional: summed capture power of the tanks present per team (cores can raise it)</param>
+        public Change Tick(float dt, int[] teamCounts, float[] teamPower, out int team)
         {
             team = None;
             int present = 0, sole = None, soleCount = 0;
@@ -54,7 +57,8 @@ namespace TankGame.Prototype
                 return Change.Decayed;
             }
 
-            float rate = StackFactor(soleCount) / CaptureSeconds;
+            float power = teamPower != null ? teamPower[sole] / soleCount : 1f;
+            float rate = StackFactor(soleCount) * power / CaptureSeconds;
             if (Owner == sole)
             {
                 OwnerHold = Mathf.Min(1f, OwnerHold + rate * 1.5f * dt);   // defenders re-fortify faster than attackers capture
@@ -117,9 +121,9 @@ namespace TankGame.Prototype
             Refresh();
         }
 
-        public CapturePointModel.Change Step(float dt, int[] teamCounts, out int team)
+        public CapturePointModel.Change Step(float dt, int[] teamCounts, float[] teamPower, out int team)
         {
-            return Model.Tick(dt, teamCounts, out team);
+            return Model.Tick(dt, teamCounts, teamPower, out team);
         }
 
         public bool Contains(Vector3 p, float extra = 0f)

@@ -297,27 +297,30 @@ namespace TankGame.Prototype.Editor
                 layout.controlPoints[i].weight = pointWeight[i];
             }
 
-            // items
+            // item slots: every slot rolls a random item (weighted) each time it appears, so no two matches look alike
             Transform pk = new GameObject("Pickups").transform;
             pk.SetParent(root.transform, false);
-            var items = new System.Collections.Generic.List<Pickup>();
             Color green = new Color(0.35f, 1f, 0.5f), cyan = new Color(0.3f, 0.85f, 1f), yellow = new Color(1f, 0.9f, 0.25f), red = new Color(1f, 0.3f, 0.25f);
             Color orange = new Color(1f, 0.65f, 0.15f), magenta = new Color(0.95f, 0.35f, 0.9f), violet = new Color(0.7f, 0.5f, 1f);
-            items.Add(BuildPickup("Repair_1", new Vector3(-24f, 0f, 10f), pk, PickupKind.Repair, "REPAIR", green, null, 25f));
-            items.Add(BuildPickup("Repair_2", new Vector3(24f, 0f, -10f), pk, PickupKind.Repair, "REPAIR", green, null, 25f));
-            items.Add(BuildPickup("Shield_1", new Vector3(24f, 0f, 10f), pk, PickupKind.Shield, "SHIELD", cyan, null, 30f));
-            items.Add(BuildPickup("Shield_2", new Vector3(-24f, 0f, -10f), pk, PickupKind.Shield, "SHIELD", cyan, null, 30f));
-            items.Add(BuildPickup("Speed_1", new Vector3(-8f, 0f, -24f), pk, PickupKind.Speed, "SPEED", yellow, null, 30f));
-            items.Add(BuildPickup("Speed_2", new Vector3(8f, 0f, 24f), pk, PickupKind.Speed, "SPEED", yellow, null, 30f));
-            items.Add(BuildPickup("Damage_1", new Vector3(0f, 0f, -24f), pk, PickupKind.Damage, "DAMAGE x1.5", red, null, 40f));
-            items.Add(BuildPickup("Damage_2", new Vector3(0f, 0f, 24f), pk, PickupKind.Damage, "DAMAGE x1.5", red, null, 40f));
-            items.Add(BuildPickup("MG_1", new Vector3(-34f, 0f, -24f), pk, PickupKind.Weapon, "MACHINE GUN", orange, machineGun, 35f));
-            items.Add(BuildPickup("MG_2", new Vector3(34f, 0f, 24f), pk, PickupKind.Weapon, "MACHINE GUN", orange, machineGun, 35f));
-            items.Add(BuildPickup("Shotgun_1", new Vector3(34f, 0f, -24f), pk, PickupKind.Weapon, "SHOTGUN", magenta, shotgun, 35f));
-            items.Add(BuildPickup("Shotgun_2", new Vector3(-34f, 0f, 24f), pk, PickupKind.Weapon, "SHOTGUN", magenta, shotgun, 35f));
-            items.Add(BuildPickup("Rocket_1", new Vector3(0f, 0f, -13f), pk, PickupKind.Weapon, "ROCKET", violet, rocket, 45f));
-            items.Add(BuildPickup("Rocket_2", new Vector3(0f, 0f, 13f), pk, PickupKind.Weapon, "ROCKET", violet, rocket, 45f));
-            layout.pickups = items.ToArray();
+            var specs = new[]
+            {
+                new VariantSpec(PickupKind.Repair, "REPAIR", green, null, 3f, 25f),
+                new VariantSpec(PickupKind.Shield, "SHIELD", cyan, null, 2f, 30f),
+                new VariantSpec(PickupKind.Speed, "SPEED", yellow, null, 2f, 30f),
+                new VariantSpec(PickupKind.Damage, "DAMAGE x1.5", red, null, 1.5f, 40f),
+                new VariantSpec(PickupKind.Weapon, "MACHINE GUN", orange, machineGun, 1.5f, 35f),
+                new VariantSpec(PickupKind.Weapon, "SHOTGUN", magenta, shotgun, 1.5f, 35f),
+                new VariantSpec(PickupKind.Weapon, "ROCKET", violet, rocket, 1f, 45f),
+            };
+            Vector3[] slotPos =
+            {
+                new Vector3(-24f, 0f, 10f), new Vector3(24f, 0f, -10f), new Vector3(24f, 0f, 10f), new Vector3(-24f, 0f, -10f),
+                new Vector3(-8f, 0f, -24f), new Vector3(8f, 0f, 24f), new Vector3(0f, 0f, -24f), new Vector3(0f, 0f, 24f),
+                new Vector3(-34f, 0f, -24f), new Vector3(34f, 0f, 24f), new Vector3(34f, 0f, -24f), new Vector3(-34f, 0f, 24f),
+                new Vector3(0f, 0f, -13f), new Vector3(0f, 0f, 13f),
+            };
+            layout.pickups = new Pickup[slotPos.Length];
+            for (int i = 0; i < slotPos.Length; i++) layout.pickups[i] = BuildSlot("Slot_" + i, slotPos[i], pk, specs);
 
             // spawn groups on the edges: 0 south, 1 north, 2 east, 3 west, 4 south-west corner
             // (2 teams use 0-1, 3 teams 0-2, solo 5 uses all)
@@ -409,14 +412,16 @@ namespace TankGame.Prototype.Editor
             return cp;
         }
 
-        static Pickup BuildPickup(string name, Vector3 pos, Transform parent, PickupKind kind, string label, Color color, WeaponDef weapon, float respawn)
+        struct VariantSpec
         {
-            Texture2D soft = AssetDatabase.LoadAssetAtPath<Texture2D>(Root + "/Textures/SoftCircle.png");
-            Material mat = PrototypeBuilder.Unlit("Item_" + kind + "_" + label.Replace(' ', '_').Replace('.', '_'), color);
-            Material baseMat = PrototypeBuilder.Particle("ItemBase_" + kind + "_" + label.Replace(' ', '_').Replace('.', '_'), soft, false);
-            baseMat.SetColor("_BaseColor", new Color(color.r, color.g, color.b, 0.6f));
+            public PickupKind kind; public string label; public Color color; public WeaponDef weapon; public float weight, respawn;
+            public VariantSpec(PickupKind kind, string label, Color color, WeaponDef weapon, float weight, float respawn)
+            { this.kind = kind; this.label = label; this.color = color; this.weapon = weapon; this.weight = weight; this.respawn = respawn; }
+        }
 
-            var go = new GameObject("Pickup_" + name);
+        static Pickup BuildSlot(string name, Vector3 pos, Transform parent, VariantSpec[] specs)
+        {
+            var go = new GameObject(name);
             go.transform.SetParent(parent, false);
             go.transform.position = pos;
             var trigger = go.AddComponent<SphereCollider>();
@@ -424,13 +429,31 @@ namespace TankGame.Prototype.Editor
             trigger.radius = 1.8f;
             trigger.center = new Vector3(0f, 0.6f, 0f);
 
-            Transform b = PrototypeBuilder.Quad("Base", go.transform, new Vector3(0f, 0.05f, 0f), new Vector3(3.6f, 3.6f, 1f), baseMat);
+            var variants = new PickupVariant[specs.Length];
+            for (int i = 0; i < specs.Length; i++) variants[i] = BuildVariant(go.transform, specs[i]);
+            var p = go.AddComponent<Pickup>();
+            p.variants = variants;
+            return p;
+        }
+
+        static PickupVariant BuildVariant(Transform slot, VariantSpec spec)
+        {
+            Texture2D soft = AssetDatabase.LoadAssetAtPath<Texture2D>(Root + "/Textures/SoftCircle.png");
+            string key = spec.kind + "_" + spec.label.Replace(' ', '_').Replace('.', '_');
+            Material mat = PrototypeBuilder.Unlit("Item_" + key, spec.color);
+            Material baseMat = PrototypeBuilder.Particle("ItemBase_" + key, soft, false);
+            baseMat.SetColor("_BaseColor", new Color(spec.color.r, spec.color.g, spec.color.b, 0.6f));
+
+            var root = new GameObject("Variant_" + key);
+            root.transform.SetParent(slot, false);
+
+            Transform b = PrototypeBuilder.Quad("Base", root.transform, new Vector3(0f, 0.05f, 0f), new Vector3(3.6f, 3.6f, 1f), baseMat);
             b.localRotation = Quaternion.Euler(90f, 0f, 0f);
 
             Transform vis = new GameObject("Visual").transform;
-            vis.SetParent(go.transform, false);
+            vis.SetParent(root.transform, false);
             vis.localPosition = new Vector3(0f, 1.2f, 0f);
-            switch (kind)
+            switch (spec.kind)
             {
                 case PickupKind.Repair:
                     PrototypeBuilder.Block("H", vis, Vector3.zero, new Vector3(1.1f, 0.34f, 0.34f), mat, false);
@@ -468,28 +491,26 @@ namespace TankGame.Prototype.Editor
             }
 
             var labelGo = new GameObject("Label");
-            labelGo.transform.SetParent(go.transform, false);
+            labelGo.transform.SetParent(root.transform, false);
             labelGo.transform.localPosition = new Vector3(0f, 3.2f, 0f);
             labelGo.transform.rotation = Quaternion.Euler(59.4f, 0f, 0f);
             var tm = labelGo.AddComponent<TextMesh>();
-            tm.text = label;
+            tm.text = spec.label;
             tm.fontSize = 48;
             tm.characterSize = 0.18f;
             tm.anchor = TextAnchor.MiddleCenter;
             tm.alignment = TextAlignment.Center;
-            tm.color = color;
+            tm.color = spec.color;
             Font font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
             tm.font = font;
             labelGo.GetComponent<MeshRenderer>().sharedMaterial = font.material;
 
-            var p = go.AddComponent<Pickup>();
-            p.kind = kind;
-            p.label = label;
-            p.color = color;
-            p.weapon = weapon;
-            p.respawnSeconds = respawn;
-            p.visual = vis;
-            return p;
+            root.SetActive(false);
+            return new PickupVariant
+            {
+                kind = spec.kind, label = spec.label, color = spec.color, weapon = spec.weapon,
+                weight = spec.weight, respawnSeconds = spec.respawn, root = root, visual = vis,
+            };
         }
 
         // ------------------------------------------------------------------ fx

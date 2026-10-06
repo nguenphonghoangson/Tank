@@ -18,6 +18,17 @@ namespace TankGame.Prototype
         public float defenseRadiusExtra = 4f;
     }
 
+    /// <summary>One of the match phases. The last phase is worth more and plays faster.</summary>
+    [Serializable]
+    public sealed class PhaseDef
+    {
+        public string name = "Phase";
+        public float scoreMultiplier = 1f;   // every score award and flag income in this phase
+        public float tempo = 1f;             // capture speed and how fast an undefended flag decays
+        public float respawnSeconds = 3f;
+        public float itemRespawnScale = 1f;  // lower = items come back sooner
+    }
+
     public sealed class TeamDef
     {
         public string name;
@@ -111,6 +122,6 @@ namespace TankGame.Prototype
         public int slot, team;
         public string name;
         public bool isLocal;
-        public int kills, deaths, assists, captures, defenses, contests, score;
+        public int kills, deaths, assists, captures, defenses, contests, score, cores;
     }
 }

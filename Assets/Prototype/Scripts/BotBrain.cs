@@ -162,7 +162,7 @@ namespace TankGame.Prototype
             cmd.Move = new Vector2(dir.x, dir.z) * moveScale;
             if (m_Target == null && dir != Vector3.zero) aimPoint = me + dir * 10f;
             cmd.AimPoint = aimPoint;
-            cmd.Reload = self.Ammo < self.weapon.magazineSize * 0.3f && m_Target == null;
+            cmd.Reload = self.Ammo < self.MagazineSize * 0.3f && m_Target == null;
             self.Command = cmd;
         }
 

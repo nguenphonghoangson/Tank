@@ -49,6 +49,10 @@ namespace TankGame.Prototype
 
         public TankCommand Command;
 
+        public TankModifiers Mods { get; } = new TankModifiers();
+        public System.Collections.Generic.List<CoreDef> Cores { get; } = new System.Collections.Generic.List<CoreDef>();
+        public int MagazineSize => Mathf.Max(1, weapon.limitedAmmo ? weapon.magazineSize : Mathf.RoundToInt(weapon.magazineSize * Mods.magazineMult));
+
         public int Hp { get; private set; }
         public bool IsDead { get; private set; }
         public Rigidbody Body { get; private set; }
@@ -57,7 +61,7 @@ namespace TankGame.Prototype
         public int Ammo { get; private set; }
         public bool IsReloading => m_Reloading;
         public bool HasSpecialWeapon => weapon != null && weapon != PrimaryWeapon;
-        public float ReloadProgress => m_Reloading && weapon.reloadSeconds > 0f ? 1f - Mathf.Clamp01(m_ReloadTimer / weapon.reloadSeconds) : 1f;
+        public float ReloadProgress => m_Reloading && weapon.reloadSeconds > 0f ? 1f - Mathf.Clamp01(m_ReloadTimer / (weapon.reloadSeconds * Mods.reloadMult)) : 1f;
         public float ProjectileSpeed => weapon != null ? weapon.projectileSpeed : projectileSpeed;
         public TankUnit Killer { get; private set; }
         public TankUnit LastAttacker { get; private set; }
@@ -70,7 +74,7 @@ namespace TankGame.Prototype
         public float SpeedTimeLeft => Mathf.Max(0f, m_SpeedUntil - Time.time);
         public float DamageTimeLeft => Mathf.Max(0f, m_DamageUntil - Time.time);
         public float SpeedMultiplier => Time.time < m_SpeedUntil ? m_SpeedMult : 1f;
-        public float DamageMultiplier => Time.time < m_DamageUntil ? m_DamageMult : 1f;
+        public float DamageMultiplier => (Time.time < m_DamageUntil ? m_DamageMult : 1f) * Mods.damageMult;
 
         public event Action<TankUnit> Fired;
         public event Action<TankUnit, int, Vector3, Vector3> Damaged;   // unit, hp damage (0 = fully absorbed), hit point, hit direction
@@ -85,7 +89,8 @@ namespace TankGame.Prototype
 
         readonly float[] m_LastDamageBy = new float[MaxSlots];
         float m_Cooldown, m_ReloadTimer, m_DashUntil, m_Speed, m_ShieldUntil, m_SpeedUntil, m_DamageUntil, m_SpeedMult = 1f, m_DamageMult = 1f;
-        int m_ShieldHp;
+        int m_ShieldHp, m_BaseMaxHp;
+        float m_LastDamagedAt = -99f, m_RegenAcc;
         bool m_Reloading, m_WasDashing;
         Vector3 m_DashVel, m_Extra;
 
@@ -104,6 +109,7 @@ namespace TankGame.Prototype
                 weapon.reloadSeconds = 0.1f;
             }
             PrimaryWeapon = weapon;
+            m_BaseMaxHp = maxHp;
             // frictionless hull: it slides along walls and cover instead of sticking to them (drive speed is set by us, not by friction)
             if (bodyCollider != null)
                 bodyCollider.sharedMaterial = new PhysicsMaterial("TankHull")
@@ -112,7 +118,7 @@ namespace TankGame.Prototype
                     frictionCombine = PhysicsMaterialCombine.Minimum, bounceCombine = PhysicsMaterialCombine.Minimum,
                 };
             Hp = maxHp;
-            Ammo = weapon.magazineSize;
+            Ammo = MagazineSize;
             ClearDamageTimes();
         }
 
@@ -121,7 +127,7 @@ namespace TankGame.Prototype
         {
             PrimaryWeapon = w;
             weapon = w;
-            Ammo = w.magazineSize;
+            Ammo = MagazineSize;
             m_Reloading = false;
         }
 
@@ -129,7 +135,7 @@ namespace TankGame.Prototype
         public void GrantWeapon(WeaponDef w)
         {
             weapon = w;
-            Ammo = w.magazineSize;
+            Ammo = MagazineSize;
             m_Reloading = false;
             m_Cooldown = Mathf.Min(m_Cooldown, 0.15f);
             WeaponChanged?.Invoke(this);
@@ -144,15 +150,22 @@ namespace TankGame.Prototype
             if (m_Reloading)
             {
                 m_ReloadTimer -= Time.deltaTime;
-                if (m_ReloadTimer <= 0f) { m_Reloading = false; Ammo = weapon.magazineSize; }
+                if (m_ReloadTimer <= 0f) { m_Reloading = false; Ammo = MagazineSize; }
             }
-            else if (Command.Reload && !weapon.limitedAmmo && Ammo < weapon.magazineSize) StartReload();
+            else if (Command.Reload && !weapon.limitedAmmo && Ammo < MagazineSize) StartReload();
 
             if (Command.Fire && m_Cooldown <= 0f && !m_Reloading)
             {
                 if (Ammo > 0) Fire(); else StartReload();
             }
             if (Skill != null) Skill.Tick(this, Command.Skill);
+
+            if (Mods.regenPerSecond > 0f && Hp < maxHp && Time.time - m_LastDamagedAt > 4f)
+            {
+                m_RegenAcc += Mods.regenPerSecond * Time.deltaTime;
+                int whole = (int)m_RegenAcc;
+                if (whole > 0) { m_RegenAcc -= whole; Heal(whole, true); }
+            }
         }
 
         void FixedUpdate()
@@ -199,7 +212,7 @@ namespace TankGame.Prototype
                 // (never drives away from the stick), then accelerates hard along the new heading
                 float dot = Vector3.Dot(fwd, desired.normalized);
                 float align = Mathf.SmoothStep(0f, 1f, Mathf.Clamp01((dot + 0.1f) / 0.75f));
-                targetSpeed = moveSpeed * SpeedMultiplier * mv.magnitude * align;
+                targetSpeed = moveSpeed * SpeedMultiplier * Mods.speedMult * mv.magnitude * align;
             }
 
             float rate = targetSpeed > m_Speed ? acceleration : brakeDeceleration;
@@ -226,12 +239,12 @@ namespace TankGame.Prototype
         {
             if (m_Reloading || weapon.limitedAmmo) return;
             m_Reloading = true;
-            m_ReloadTimer = weapon.reloadSeconds;
+            m_ReloadTimer = weapon.reloadSeconds * Mods.reloadMult;
         }
 
         void Fire()
         {
-            m_Cooldown = weapon.fireInterval;
+            m_Cooldown = weapon.fireInterval * Mods.fireIntervalMult;
             Ammo--;
             Vector3 aim = muzzle.forward;
             int pellets = Mathf.Max(1, weapon.pellets);
@@ -252,7 +265,7 @@ namespace TankGame.Prototype
                 {
                     // special weapon is empty: back to the primary weapon with a full magazine
                     weapon = PrimaryWeapon;
-                    Ammo = weapon.magazineSize;
+                    Ammo = MagazineSize;
                     WeaponChanged?.Invoke(this);
                 }
                 else StartReload();
@@ -271,6 +284,7 @@ namespace TankGame.Prototype
         {
             if (IsDead) return;
             LastAttacker = source;
+            m_LastDamagedAt = Time.time;
             if (source != null && source != this && source.slot >= 0 && source.slot < MaxSlots) m_LastDamageBy[source.slot] = Time.time;
 
             int rawDamage = damage;
@@ -287,13 +301,13 @@ namespace TankGame.Prototype
         }
 
         /// <summary>Returns the amount actually healed.</summary>
-        public int Heal(int amount)
+        public int Heal(int amount, bool silent = false)
         {
             if (IsDead) return 0;
             int applied = Mathf.Min(amount, maxHp - Hp);
             if (applied <= 0) return 0;
             Hp += applied;
-            Healed?.Invoke(this, applied);
+            if (!silent) Healed?.Invoke(this, applied);
             return applied;
         }
 
@@ -347,7 +361,7 @@ namespace TankGame.Prototype
             if (bodyCollider != null) bodyCollider.enabled = true;
             Hp = maxHp;
             weapon = PrimaryWeapon;
-            Ammo = weapon.magazineSize;
+            Ammo = MagazineSize;
             m_Reloading = false;
             m_Cooldown = 0.5f;
             m_DashUntil = 0f;
@@ -365,6 +379,17 @@ namespace TankGame.Prototype
             Command = default;
             WeaponChanged?.Invoke(this);
             Respawned?.Invoke(this);
+        }
+
+        /// <summary>Apply a core: stats change immediately; a max-HP bonus also heals by the same amount.</summary>
+        public void AddCore(CoreDef core)
+        {
+            int oldMax = maxHp, oldMag = MagazineSize;
+            Cores.Add(core);
+            Mods.Add(core.delta);
+            maxHp = Mathf.Max(30, m_BaseMaxHp + Mods.maxHpBonus);
+            if (!IsDead) Hp = Mathf.Clamp(Hp + Mathf.Max(0, maxHp - oldMax), 1, maxHp);
+            if (!weapon.limitedAmmo) Ammo = Mathf.Clamp(Ammo + (MagazineSize - oldMag), 0, MagazineSize);
         }
 
         void ClearDamageTimes()
