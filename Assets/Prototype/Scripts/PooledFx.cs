@@ -32,7 +32,7 @@ namespace TankGame.Prototype
             if (flashLight != null)
             {
                 flashLight.intensity = m_LightPeak;
-                flashLight.enabled = true;
+                flashLight.enabled = !Application.isMobilePlatform;      // realtime flash lights are too costly on a phone
             }
         }
 

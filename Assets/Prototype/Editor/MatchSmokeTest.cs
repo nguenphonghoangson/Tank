@@ -36,7 +36,7 @@ namespace TankGame.Prototype.Editor
         static CameraRig s_Rig;
         static GameObject s_Anchor;
         static float s_FirstCaptureAt = -1f, s_MaxShare;
-        static string s_ModelResult;
+        static string s_ModelResult, s_LayoutResult;
         static TankUnit s_Tank;
         static int s_ShotsFired, s_ShotsBeforeReload, s_AmmoAtReload, s_AmmoAfterReload, s_HpBefore, s_HpAfter;
         static float s_DashDistance, s_DashCooldown, s_ReloadSeconds;
@@ -60,7 +60,7 @@ namespace TankGame.Prototype.Editor
         static int s_Phase;
         static MatchMode[] s_Modes = { MatchMode.TwoTeams3v2, MatchMode.ThreeTeams221, MatchMode.Solo5 };
 
-        static bool s_Hooked;
+        static bool s_Hooked, s_HudOnly;
 
         static MatchSmokeTest()
         {
@@ -102,7 +102,9 @@ namespace TankGame.Prototype.Editor
             s_Step = 0; s_T0 = Time.realtimeSinceStartupAsDouble; s_StartFrame = Time.frameCount;
             s_Due.Clear(); s_Msgs.Clear(); s_Presets.Clear();
             s_Errors = 0; s_PresetIndex = 0; s_ContestedFrames = 0; s_Frames = 0; s_MaxPhase = 0; s_FirstCaptureAt = -1f; s_MaxShare = 0f; s_ReloadSeen = false; s_PickupConsumed = false; s_FlagDecayed = false; s_FlagDecayAt = -1f;
+            s_HudOnly = SessionState.GetBool("TankMatch.Smoke.HudOnly", false);
             s_ModelResult = ModelSelfTest();
+            s_LayoutResult = LayoutSelfTest();
             Application.logMessageReceived += OnLog;
             EditorApplication.update += Tick;
         }
@@ -124,6 +126,43 @@ namespace TankGame.Prototype.Editor
         }
 
         // ------------------------------------------------------------------ capture rules in isolation
+
+        static string LayoutSelfTest()
+        {
+            // phones (several aspect ratios, with and without a notch) and desktop: nothing may overlap, everything stays on screen
+            var cases = new[]
+            {
+                new object[] { "phone19.5:9", 857f, 440f, new Rect(34f, 0f, 857f - 68f, 440f - 14f), true },
+                new object[] { "phone16:9", 782f, 440f, new Rect(0f, 0f, 782f, 440f), true },
+                new object[] { "phone4:3", 587f, 440f, new Rect(0f, 0f, 587f, 440f), true },
+                new object[] { "desktop16:9", 1280f, 720f, new Rect(0f, 0f, 1280f, 720f), false },
+                new object[] { "desktop4:3", 960f, 720f, new Rect(0f, 0f, 960f, 720f), false },
+            };
+            var sb = new StringBuilder();
+            foreach (object[] c in cases)
+            {
+                HudLayout l = HudLayout.Compute((float)c[1], (float)c[2], (Rect)c[3], (bool)c[4]);
+                var items = new System.Collections.Generic.List<Rect>(l.Reserved());
+                int bad = 0;
+                for (int i = 0; i < items.Count; i++)
+                {
+                    if (items[i].xMin < l.safe.xMin - 0.01f || items[i].xMax > l.safe.xMax + 0.01f || items[i].yMin < l.safe.yMin - 0.01f || items[i].yMax > l.safe.yMax + 0.01f) bad++;
+                    for (int j = i + 1; j < items.Count; j++) if (items[i].Overlaps(items[j])) bad++;
+                }
+                if ((bool)c[4])
+                {
+                    Rect[] thumbs = l.ThumbZones();
+                    for (int t = 0; t < thumbs.Length; t++)
+                    {
+                        foreach (Rect r in items) if (r.Overlaps(thumbs[t])) bad++;
+                        if (thumbs[t].xMin < l.safe.xMin || thumbs[t].xMax > l.safe.xMax || thumbs[t].yMax > l.safe.yMax) bad++;
+                    }
+                    if (thumbs[0].Overlaps(thumbs[1])) bad++;
+                }
+                sb.Append(c[0]).Append('=').Append(bad).Append(' ');
+            }
+            return sb.ToString().Trim();
+        }
 
         static string ModelSelfTest()
         {
@@ -204,7 +243,8 @@ namespace TankGame.Prototype.Editor
                     s_Rig.target = s_Anchor.transform;
                     s_StepT = now;
                     Schedule(10, "a_overview_10s"); Schedule(35, "b_overview_35s"); Schedule(65, "c_overview_65s");
-                    s_Step = 1;
+                    s_Step = s_HudOnly ? 41 : 1;
+                    s_Phase = 0;
                     break;
                 }
                 case 1: // let the match run to its end
@@ -258,6 +298,7 @@ namespace TankGame.Prototype.Editor
                         float y = Screen.height * 0.3f, R = s_Match.mobileInput.StickRadius;
                         Touch(1, new Vector2(Screen.width * 0.2f + R, y), UnityEngine.InputSystem.TouchPhase.Moved);          // push the move stick right
                         Touch(2, new Vector2(Screen.width * 0.8f, y + R), UnityEngine.InputSystem.TouchPhase.Moved);          // push the aim stick up
+                        Schedule(0.6, "hud_play_mobile");
                         s_PhaseT = now; s_Phase = 2;
                     }
                     else if (s_Phase == 2 && now - s_PhaseT > 1.0)
@@ -276,16 +317,34 @@ namespace TankGame.Prototype.Editor
                     else if (s_Phase == 3 && now - s_PhaseT > 0.4)
                     {
                         s_TouchIdle = s_Tank.Command.Move == Vector2.zero && !s_Tank.Command.Fire;
-                        Rect d = s_Match.mobileInput.DashRect;
-                        Touch(3, d.center, UnityEngine.InputSystem.TouchPhase.Began);
+                        Touch(3, s_Match.mobileInput.DashCenter, UnityEngine.InputSystem.TouchPhase.Began);
                         s_PhaseT = now; s_Phase = 4;
                     }
                     else if (s_Phase == 4 && now - s_PhaseT > 0.3)
                     {
                         s_TouchDashCd = s_Tank.Skill.CooldownRemaining;
-                        Touch(3, s_Match.mobileInput.DashRect.center, UnityEngine.InputSystem.TouchPhase.Ended);
+                        Touch(3, s_Match.mobileInput.DashCenter, UnityEngine.InputSystem.TouchPhase.Ended);
                         InputSystem.RemoveDevice(s_Touch);
                         s_Match.forceMobileControls = false; s_Match.allBots = true;
+                        s_Phase = 0; s_Step = 41;
+                    }
+                    break;
+                }
+                case 41: // HUD screenshots: core pick and end screen on the phone layout
+                {
+                    if (s_Phase == 0)
+                    {
+                        s_Match.allBots = false; s_Match.coresEnabled = true; s_Match.forceMobileControls = true;
+                        s_Match.StartMatch(MatchConfig.Preset(MatchMode.TwoTeams2v2));
+                        Schedule(0.3, "hud_pick_mobile");
+                        s_PhaseT = now; s_Phase = 1;
+                    }
+                    else if (s_Phase == 1 && now - s_PhaseT > 0.7) { s_Match.PickCore(0); s_PhaseT = now; s_Phase = 2; }
+                    else if (s_Phase == 2 && now - s_PhaseT > 1.5) { s_Match.EndNow(); Schedule(0.3, "hud_end_mobile"); s_PhaseT = now; s_Phase = 3; }
+                    else if (s_Phase == 3 && now - s_PhaseT > 0.8)
+                    {
+                        s_Match.forceMobileControls = false; s_Match.allBots = true; s_Match.coresEnabled = false;
+                        if (s_HudOnly) { Finish(null); return; }
                         s_Phase = 0; s_Step = 10;
                     }
                     break;
@@ -548,7 +607,7 @@ namespace TankGame.Prototype.Editor
             EditorApplication.update -= Tick;
             var sb = new StringBuilder();
             sb.Append("{\n  \"failure\": ").Append(failure == null ? "null" : "\"" + failure + "\"").Append(",\n  \"capture_model\": \"").Append(s_ModelResult)
-              .Append("\",\n  \"phases\": {\"max_phase_index\":").Append(s_MaxPhase).Append(",\"cores_picked_min_per_player\":").Append(s_CoresMin)
+              .Append("\",\n  \"hud_layout_violations\": \"").Append(s_LayoutResult).Append("\",\n  \"phases\": {\"max_phase_index\":").Append(s_MaxPhase).Append(",\"cores_picked_min_per_player\":").Append(s_CoresMin)
               .Append(",\"winner_has_top_score\":").Append(s_WinnerTopScore ? "true" : "false").Append(",\"final_phase_x2\":").Append(s_FinalMultiplier ? "true" : "false")
               .Append(",\"flag_income_total\":").Append(F(s_IncomeTotal)).Append("},\n  \"randomness\": {\"same_seed_same_offers\":").Append(s_OffersA == s_OffersB ? "true" : "false")
               .Append(",\"same_seed_same_items\":").Append(s_ItemsA == s_ItemsB ? "true" : "false").Append(",\"item_types_present\":").Append(s_ItemKinds)
@@ -574,6 +633,7 @@ namespace TankGame.Prototype.Editor
 
         static void Capture(string name)
         {
+            if (name.StartsWith("hud_")) { ScreenCapture.CaptureScreenshot(Path.Combine(s_Dir, name + ".png")); return; }
             Camera cam = Camera.main;
             if (cam == null) return;
             const int w = 1280, h = 720;

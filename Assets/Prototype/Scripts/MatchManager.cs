@@ -86,12 +86,24 @@ namespace TankGame.Prototype
         float m_PickEnds;
         int m_LogHead;
 
+        public void Restart() { StartMatch(MatchConfig.Preset(mode)); }
+
+        public void NextMode()
+        {
+            mode = (MatchMode)(((int)mode + 1) % Enum.GetValues(typeof(MatchMode)).Length);
+            StartMatch(MatchConfig.Preset(mode));
+        }
+
+        /// <summary>Test hook: finish the match now.</summary>
+        public void EndNow() { if (State != MatchState.Ended) End("Test", -1); }
+
         public bool UseTouch => Application.isMobilePlatform || forceMobileControls;
 
         void Start()
         {
             if (Application.isMobilePlatform)
             {
+                MobilePerformance.Apply();
                 Application.targetFrameRate = 60;
                 Screen.sleepTimeout = SleepTimeout.NeverSleep;
             }
@@ -293,12 +305,8 @@ namespace TankGame.Prototype
             Keyboard kb = Keyboard.current;
             if (kb != null)
             {
-                if (kb.f5Key.wasPressedThisFrame) StartMatch(MatchConfig.Preset(mode));
-                if (kb.mKey.wasPressedThisFrame)
-                {
-                    mode = (MatchMode)(((int)mode + 1) % Enum.GetValues(typeof(MatchMode)).Length);
-                    StartMatch(MatchConfig.Preset(mode));
-                }
+                if (kb.f5Key.wasPressedThisFrame) Restart();
+                if (kb.mKey.wasPressedThisFrame) NextMode();
             }
 
             if (State == MatchState.Picking)

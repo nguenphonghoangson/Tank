@@ -5,56 +5,125 @@ using UnityEngine.InputSystem;
 namespace TankGame.Prototype
 {
     /// <summary>
-    /// Throwaway IMGUI debug HUD: territory bar, team rows, local player status, control point markers, event log,
-    /// scoreboard (hold Tab, and at match end). IMGUI allocates every frame; replace it when real UI work starts.
+    /// Throwaway IMGUI HUD, laid out by HudLayout in a fixed reference height so every screen gets the same arrangement:
+    /// status top-left, score bar top-centre, minimap top-right, thumbs at the bottom corners, Dash/Reload on the right edge.
+    /// IMGUI allocates every frame; replace it when real UI work starts.
     /// </summary>
     public sealed class MatchHud : MonoBehaviour
     {
         public MatchManager match;
         public Camera cam;
 
-        // IMGUI is laid out in "virtual" pixels; on a phone everything is scaled up by the screen density so it stays readable
+        const float RefHeightPhone = 440f, RefHeightDesktop = 720f;
+
         bool Mobile => match != null && match.UseTouch;
-        float S => Mobile ? Mathf.Clamp((Screen.dpi > 0f ? Screen.dpi : 160f) / 150f, 1f, 3.2f) : 1f;
+        float S => Screen.height / (Mobile ? RefHeightPhone : RefHeightDesktop);
         float W => Screen.width / S;
         float H => Screen.height / S;
 
-        GUIStyle m_Label, m_Big, m_Small;
+        HudLayout m_Layout;
+        GUIStyle m_Label, m_Small, m_Tiny, m_Big, m_Center, m_Wrap;
         Texture2D m_White, m_Disc;
+        float m_FpsSmooth = 60f;
         readonly List<int> m_Order = new List<int>();
+
+        // ------------------------------------------------------------------ layout and input
+
+        Rect SafeVirtual()
+        {
+            Rect sa = Screen.safeArea;
+            float s = S;
+            return new Rect(sa.x / s, (Screen.height - sa.yMax) / s, sa.width / s, sa.height / s);
+        }
+
+        Vector2 ToPx(Vector2 virt) { return new Vector2(virt.x * S, Screen.height - virt.y * S); }
+        Vector2 ToVirtual(Vector2 px) { return new Vector2(px.x / S, (Screen.height - px.y) / S); }
+
+        void Update()
+        {
+            if (match == null || match.Players == null) return;
+            m_Layout = HudLayout.Compute(W, H, SafeVirtual(), Mobile);
+            m_FpsSmooth = Mathf.Lerp(m_FpsSmooth, 1f / Mathf.Max(0.0001f, Time.unscaledDeltaTime), 0.05f);
+
+            // what is drawn is what is touched
+            MobileTankInput mi = match.mobileInput;
+            if (mi != null)
+            {
+                mi.DashCenter = ToPx(m_Layout.dashC); mi.DashRadius = m_Layout.dashR * S;
+                mi.ReloadCenter = ToPx(m_Layout.reloadC); mi.ReloadRadius = m_Layout.reloadR * S;
+            }
+
+            Pointer ptr = Pointer.current;
+            bool pressed = ptr != null && ptr.press.wasPressedThisFrame;
+            Vector2 p = pressed ? ToVirtual(ptr.position.ReadValue()) : Vector2.zero;
+
+            CoreDef[] offers = match.LocalOffers;
+            if (offers != null)
+            {
+                Keyboard kb = Keyboard.current;
+                if (kb != null)
+                {
+                    if (kb.digit1Key.wasPressedThisFrame && offers.Length > 0) match.PickCore(0);
+                    else if (kb.digit2Key.wasPressedThisFrame && offers.Length > 1) match.PickCore(1);
+                    else if (kb.digit3Key.wasPressedThisFrame && offers.Length > 2) match.PickCore(2);
+                }
+                if (pressed && match.LocalOffers != null)
+                    for (int i = 0; i < offers.Length; i++) if (CardRect(i).Contains(p)) { match.PickCore(i); break; }
+            }
+            else if (match.State == MatchManager.MatchState.Ended && pressed)
+            {
+                if (EndButton(0).Contains(p)) match.Restart();
+                else if (EndButton(1).Contains(p)) match.NextMode();
+            }
+        }
+
+        // ------------------------------------------------------------------ drawing
 
         void OnGUI()
         {
             if (Event.current.type != EventType.Repaint || match == null || match.Players == null || match.Layout == null) return;
-            if (m_Label == null)
-            {
-                m_White = Texture2D.whiteTexture;
-                m_Label = new GUIStyle(GUI.skin.label) { fontSize = 16, fontStyle = FontStyle.Bold };
-                m_Label.normal.textColor = Color.white;
-                m_Big = new GUIStyle(m_Label) { fontSize = 34, alignment = TextAnchor.MiddleCenter };
-                m_Small = new GUIStyle(m_Label) { fontSize = 13, fontStyle = FontStyle.Normal };
-            }
-
-            Matrix4x4 savedMatrix = GUI.matrix;
-            GUI.matrix = Matrix4x4.Scale(new Vector3(S, S, 1f));
+            if (m_Label == null) MakeStyles();
             EnsureDisc();
-            DrawTerritory();
-            DrawLocalStatus();
-            DrawPointMarkers();
-            DrawMinimap();
-            DrawLog();
-            DrawRespawn();
-            Keyboard kb = Keyboard.current;
-            if (match.State == MatchManager.MatchState.Picking) DrawPicking();
-            else if (match.State == MatchManager.MatchState.Ended) DrawEnd();
-            else if (kb != null && kb.tabKey.isPressed) DrawScoreboard(new Rect(W * 0.5f - 300f, 120f, 600f, 260f), true);
-            if (Mobile) DrawTouchControls();
-            else GUI.Label(new Rect(14f, H - 30f, W - 28f, 24f),
-                "WASD move   Mouse aim   LMB fire   R reload   Space dash   Tab scoreboard   F5 restart   M next mode", m_Small);
-            GUI.matrix = savedMatrix;
+            Matrix4x4 saved = GUI.matrix;
+            GUI.matrix = Matrix4x4.Scale(new Vector3(S, S, 1f));
+            HudLayout L = m_Layout;
+            if (L.W <= 0f) L = HudLayout.Compute(W, H, SafeVirtual(), Mobile);
+
+            bool overlay = match.State != MatchManager.MatchState.Playing;
+            if (overlay)
+            {
+                // core pick and results are full-screen: nothing else may draw underneath and clash with them
+                if (match.State == MatchManager.MatchState.Picking) DrawPicking(); else DrawEnd();
+            }
+            else
+            {
+                DrawScoreBar(L);
+                DrawStatus(L);
+                DrawMinimap(L.minimap);
+                DrawFlagMarkers(L);
+                DrawLog(L);
+                DrawRespawn();
+                if (Mobile) DrawTouchControls(L);
+                DrawStats(L);
+                Keyboard kb = Keyboard.current;
+                if (!Mobile && kb != null && kb.tabKey.isPressed) DrawScoreboard(new Rect(W * 0.5f - 300f, 130f, 600f, 260f));
+                if (!Mobile)
+                    GUI.Label(new Rect(L.safe.x + 10f, L.safe.yMax - 24f, W - 40f, 20f), "WASD move   Mouse aim   LMB fire   R reload   Space dash   Tab scoreboard   F5 restart   M next mode", m_Tiny);
+            }
+            GUI.matrix = saved;
         }
 
-        // ------------------------------------------------------------------ pieces
+        void MakeStyles()
+        {
+            m_White = Texture2D.whiteTexture;
+            m_Label = new GUIStyle(GUI.skin.label) { fontSize = 15, fontStyle = FontStyle.Bold, wordWrap = false };
+            m_Label.normal.textColor = Color.white;
+            m_Small = new GUIStyle(m_Label) { fontSize = 12, fontStyle = FontStyle.Normal };
+            m_Tiny = new GUIStyle(m_Small) { fontSize = 11 };
+            m_Big = new GUIStyle(m_Label) { fontSize = 30, alignment = TextAnchor.MiddleCenter };
+            m_Center = new GUIStyle(m_Small) { alignment = TextAnchor.MiddleCenter };
+            m_Wrap = new GUIStyle(m_Small) { wordWrap = true, fontSize = 14, alignment = TextAnchor.UpperLeft };
+        }
 
         void Box(Rect r, Color c)
         {
@@ -63,199 +132,6 @@ namespace TankGame.Prototype
             GUI.DrawTexture(r, m_White);
             GUI.color = prev;
         }
-
-        void DrawTerritory()
-        {
-            float w = 560f, x = W * 0.5f - w * 0.5f, y = 12f;
-            Box(new Rect(x - 2, y - 2, w + 4, 26f), new Color(0f, 0f, 0f, 0.6f));
-            float cx = x;
-            for (int t = 0; t < match.CurrentShare.Length; t++)
-            {
-                float sw = w * match.CurrentShare[t];
-                if (sw <= 0.5f) continue;
-                Box(new Rect(cx, y, sw, 22f), match.TeamColor(t));
-                cx += sw;
-            }
-            Box(new Rect(cx, y, x + w - cx, 22f), new Color(0.4f, 0.42f, 0.48f, 0.8f));
-
-            int secs = Mathf.CeilToInt(Mathf.Max(0f, match.PhaseTimeLeft));
-            bool last = match.PhaseIndex == match.phases.Length - 1;
-            string banner = match.CurrentPhase.name + "  " + (match.PhaseIndex + 1) + "/" + match.phases.Length + "   " + (secs / 60) + ":" + (secs % 60).ToString("00") +
-                            (match.CurrentPhase.scoreMultiplier > 1f ? "   score x" + match.CurrentPhase.scoreMultiplier.ToString("0.##") : "");
-            var bs = new GUIStyle(m_Label) { alignment = TextAnchor.MiddleCenter };
-            bs.normal.textColor = last ? new Color(1f, 0.55f, 0.3f) : Color.white;
-            GUI.Label(new Rect(x, y + 28f, w, 24f), banner, bs);
-
-            for (int t = 0; t < match.CurrentShare.Length; t++)
-            {
-                float rowY = y + 54f + t * 20f;
-                Box(new Rect(x, rowY + 3f, 12f, 12f), match.TeamColor(t));
-                GUI.Label(new Rect(x + 18f, rowY - 2f, w, 22f),
-                    match.TeamName(t) + "   score " + match.TeamScore(t) + "   (flags +" + Mathf.RoundToInt(match.TeamIncome[t]) + ")   holding " + Mathf.RoundToInt(match.CurrentShare[t] * 100f) + "%", m_Small);
-            }
-
-            if (match.DominatingTeam >= 0 && match.State == MatchManager.MatchState.Playing)
-            {
-                float left = Mathf.Max(0f, match.dominationSeconds - match.DominationTimer);
-                GUI.Label(new Rect(x, y + 56f + match.CurrentShare.Length * 20f, w, 24f),
-                    match.TeamName(match.DominatingTeam) + " dominates: wins in " + Mathf.CeilToInt(left) + "s", m_Label);
-            }
-        }
-
-        void DrawLocalStatus()
-        {
-            if (match.LocalSlot < 0) return;
-            TankUnit u = match.Tanks[match.LocalSlot];
-            PlayerStats s = match.Players[match.LocalSlot];
-            Box(new Rect(14f, 14f, 232f, 24f), new Color(0f, 0f, 0f, 0.55f));
-            Box(new Rect(16f, 16f, 228f * u.Hp / u.maxHp, 20f), Color.Lerp(new Color(0.9f, 0.2f, 0.15f), new Color(0.3f, 0.85f, 0.35f), (float)u.Hp / u.maxHp));
-            GUI.Label(new Rect(20f, 13f, 220f, 26f), "HP " + u.Hp, m_Label);
-            string ammo = u.weapon.displayName + (u.IsReloading ? "  RELOADING " + Mathf.RoundToInt(u.ReloadProgress * 100f) + "%" : "  " + u.Ammo + (u.weapon.limitedAmmo ? " shots" : "/" + u.MagazineSize));
-            GUI.Label(new Rect(14f, 42f, 360f, 24f), ammo, m_Label);
-            float by = 108f;
-            for (int c = 0; c < u.Cores.Count; c++) { GUI.Label(new Rect(14f, by, 320f, 20f), "Core: " + u.Cores[c].name, m_Small); by += 18f; }
-            if (u.ShieldHp > 0) { GUI.Label(new Rect(14f, by, 300f, 20f), "Shield " + u.ShieldHp + "  " + Mathf.CeilToInt(u.ShieldTimeLeft) + "s", m_Small); by += 18f; }
-            if (u.SpeedTimeLeft > 0f) { GUI.Label(new Rect(14f, by, 300f, 20f), "Speed boost  " + Mathf.CeilToInt(u.SpeedTimeLeft) + "s", m_Small); by += 18f; }
-            if (u.DamageTimeLeft > 0f) { GUI.Label(new Rect(14f, by, 300f, 20f), "Damage boost  " + Mathf.CeilToInt(u.DamageTimeLeft) + "s", m_Small); by += 18f; }
-            if (u.Skill != null)
-            {
-                Box(new Rect(16f, 70f, 120f, 10f), new Color(0f, 0f, 0f, 0.55f));
-                Box(new Rect(16f, 70f, 120f * u.Skill.Ready01, 10f), u.Skill.Ready01 >= 1f ? new Color(0.4f, 0.9f, 1f) : new Color(0.5f, 0.55f, 0.6f));
-                GUI.Label(new Rect(142f, 62f, 200f, 24f), u.Skill.displayName + (u.Skill.Ready01 >= 1f ? " ready" : ""), m_Small);
-            }
-            GUI.Label(new Rect(14f, 88f, 320f, 24f), "K " + s.kills + "  D " + s.deaths + "  A " + s.assists + "  Cap " + s.captures + "  Score " + s.score, m_Small);
-        }
-
-        void DrawPointMarkers()
-        {
-            if (cam == null) return;
-            foreach (ControlPoint cp in match.Layout.controlPoints)
-            {
-                Vector3 sp = cam.WorldToScreenPoint(cp.transform.position);
-                bool behind = sp.z < 0f;
-                float x = sp.x / S, y = (Screen.height - sp.y) / S;
-                const float pad = 36f;
-                bool inside = !behind && x > pad && x < W - pad && y > pad && y < H - pad;
-                Color c = cp.Owner >= 0 ? match.TeamColor(cp.Owner) : new Color(0.62f, 0.64f, 0.7f);
-                if (inside) continue;                                   // on screen: the zone itself shows ownership
-                if (behind) { x = W - x; y = H - y; }
-                x = Mathf.Clamp(x, pad, W - pad);
-                y = Mathf.Clamp(y, pad, H - pad);
-                float pulse = cp.Contested ? 0.6f + 0.4f * Mathf.Sin(Time.unscaledTime * 10f) : 1f;
-                Box(new Rect(x - 17f, y - 17f, 34f, 34f), new Color(0f, 0f, 0f, 0.7f));
-                Box(new Rect(x - 15f, y - 15f, 30f, 30f), new Color(c.r, c.g, c.b, pulse));
-                GUI.Label(new Rect(x - 9f, y - 13f, 30f, 28f), cp.label, m_Label);
-            }
-        }
-
-
-
-        // ------------------------------------------------------------------ core picking
-
-        Rect CardRect(int i)
-        {
-            float w = Mathf.Min(260f, (W - 90f) / 3f), h = Mathf.Min(210f, H * 0.55f), gap = Mathf.Min(26f, W * 0.02f);
-            float x0 = (W - (3f * w + 2f * gap)) * 0.5f;
-            return new Rect(x0 + i * (w + gap), H * 0.5f - h * 0.5f + 20f, w, h);
-        }
-
-        void Update()
-        {
-            if (match == null) return;
-            CoreDef[] offers = match.LocalOffers;
-            if (offers == null) return;
-            Keyboard kb = Keyboard.current;
-            if (kb != null)
-            {
-                if (kb.digit1Key.wasPressedThisFrame && offers.Length > 0) match.PickCore(0);
-                else if (kb.digit2Key.wasPressedThisFrame && offers.Length > 1) match.PickCore(1);
-                else if (kb.digit3Key.wasPressedThisFrame && offers.Length > 2) match.PickCore(2);
-            }
-            Pointer ptr = Pointer.current;
-            if (ptr != null && ptr.press.wasPressedThisFrame && match.LocalOffers != null)
-            {
-                Vector2 m = ptr.position.ReadValue();
-                Vector2 p = new Vector2(m.x / S, (Screen.height - m.y) / S);
-                for (int i = 0; i < offers.Length; i++) if (CardRect(i).Contains(p)) { match.PickCore(i); break; }
-            }
-        }
-
-        void DrawPicking()
-        {
-            Box(new Rect(0f, 0f, W, H), new Color(0f, 0f, 0f, 0.6f));
-            bool last = match.PhaseIndex == match.phases.Length - 1;
-            GUI.Label(new Rect(0f, H * 0.5f - 190f, W, 50f),
-                match.CurrentPhase.name + (last ? "  -  score x" + match.CurrentPhase.scoreMultiplier.ToString("0.##") + ", faster" : ""), m_Big);
-            CoreDef[] offers = match.LocalOffers;
-            if (offers == null)
-            {
-                GUI.Label(new Rect(0f, H * 0.5f - 20f, W, 30f), "Waiting...", m_Big);
-                return;
-            }
-            GUI.Label(new Rect(0f, H * 0.5f - 140f, W, 30f), "Choose a core (" + (Mobile ? "tap" : "1 / 2 / 3 or click") + ")   " + Mathf.CeilToInt(match.PickTimeLeft) + "s",
-                new GUIStyle(m_Label) { alignment = TextAnchor.MiddleCenter });
-            Vector2 mouse = Pointer.current != null ? Pointer.current.position.ReadValue() : Vector2.zero;
-            Vector2 mp = new Vector2(mouse.x / S, (Screen.height - mouse.y) / S);
-            var wrap = new GUIStyle(m_Small) { wordWrap = true, fontSize = 15, alignment = TextAnchor.UpperLeft };
-            for (int i = 0; i < offers.Length; i++)
-            {
-                Rect r = CardRect(i);
-                bool hover = r.Contains(mp);
-                Box(new Rect(r.x - 3f, r.y - 3f, r.width + 6f, r.height + 6f), hover ? Color.white : new Color(1f, 1f, 1f, 0.15f));
-                Box(r, new Color(0.08f, 0.1f, 0.14f, 0.97f));
-                Box(new Rect(r.x, r.y, r.width, 8f), offers[i].color);
-                GUI.Label(new Rect(r.x + 14f, r.y + 18f, r.width - 28f, 30f), "[" + (i + 1) + "]  " + offers[i].name, m_Label);
-                GUI.Label(new Rect(r.x + 14f, r.y + 62f, r.width - 28f, r.height - 70f), offers[i].description, wrap);
-            }
-            // what the tank already has
-            TankUnit u = match.Tanks[match.LocalSlot];
-            if (u.Cores.Count > 0)
-            {
-                string have = "Your build:  ";
-                for (int c = 0; c < u.Cores.Count; c++) have += (c > 0 ? ", " : "") + u.Cores[c].name;
-                GUI.Label(new Rect(0f, H * 0.5f + 250f, W, 26f), have, new GUIStyle(m_Small) { alignment = TextAnchor.MiddleCenter });
-            }
-        }
-
-
-        // ------------------------------------------------------------------ touch controls
-
-        void DrawTouchControls()
-        {
-            MobileTankInput m = match.mobileInput;
-            if (m == null || !m.enabled || match.State != MatchManager.MatchState.Playing) return;
-            float R = m.StickRadius / S;
-            Vector2 moveHint = new Vector2(R * 1.6f, H - R * 1.9f), aimHint = new Vector2(W - R * 1.6f, H - R * 1.9f);
-            DrawStick(m.MoveActive ? ToVirtual(m.MoveOrigin) : moveHint, m.MoveActive ? ToVirtual(m.MoveNow) : moveHint, R, new Color(1f, 1f, 1f, m.MoveActive ? 0.35f : 0.12f), "MOVE");
-            DrawStick(m.AimActive ? ToVirtual(m.AimOrigin) : aimHint, m.AimActive ? ToVirtual(m.AimNow) : aimHint, R, m.Firing ? new Color(1f, 0.5f, 0.3f, 0.55f) : new Color(1f, 1f, 1f, m.AimActive ? 0.35f : 0.12f), "AIM / FIRE");
-
-            TankUnit u = match.LocalSlot >= 0 ? match.Tanks[match.LocalSlot] : null;
-            Rect dash = ToVirtual(m.DashRect), reload = ToVirtual(m.ReloadRect);
-            float ready = u != null && u.Skill != null ? u.Skill.Ready01 : 1f;
-            Box(dash, new Color(0f, 0f, 0f, 0.5f));
-            Box(new Rect(dash.x, dash.yMax - dash.height * ready, dash.width, dash.height * ready), new Color(0.4f, 0.9f, 1f, m.DashHeld ? 0.9f : 0.55f));
-            GUI.Label(new Rect(dash.x + 4f, dash.y + dash.height * 0.3f, dash.width, 24f), "DASH", m_Small);
-            Box(reload, new Color(0f, 0f, 0f, 0.5f));
-            if (m.ReloadHeld) Box(reload, new Color(1f, 1f, 1f, 0.3f));
-            GUI.Label(new Rect(reload.x + 2f, reload.y + reload.height * 0.3f, reload.width, 24f), "RELOAD", m_Small);
-        }
-
-        void DrawStick(Vector2 origin, Vector2 now, float radius, Color col, string label)
-        {
-            Disc(origin, radius, new Color(col.r, col.g, col.b, col.a * 0.5f));
-            Vector2 d = Vector2.ClampMagnitude(now - origin, radius);
-            Disc(origin + d, radius * 0.45f, new Color(col.r, col.g, col.b, Mathf.Min(1f, col.a * 2f)));
-            GUI.Label(new Rect(origin.x - radius * 0.6f, origin.y + radius * 1.05f, radius * 2f, 20f), label, m_Small);
-        }
-
-        Vector2 ToVirtual(Vector2 screenPx) { return new Vector2(screenPx.x / S, (Screen.height - screenPx.y) / S); }
-
-        Rect ToVirtual(Rect screenPx)
-        {
-            return new Rect(screenPx.x / S, (Screen.height - screenPx.yMax) / S, screenPx.width / S, screenPx.height / S);
-        }
-
-        // ------------------------------------------------------------------ minimap
 
         void EnsureDisc()
         {
@@ -279,30 +155,162 @@ namespace TankGame.Prototype
             GUI.color = prev;
         }
 
-        void DrawMinimap()
+        static string Short(string s, int n) { return s.Length <= n ? s : s.Substring(0, n); }
+
+        // ---- top centre: phase, clock, one chip per team, thin territory bar
+
+        void DrawScoreBar(HudLayout L)
         {
-            EnsureDisc();
+            Rect b = L.scoreBar;
+            Box(b, new Color(0f, 0f, 0f, 0.58f));
+            bool last = match.PhaseIndex == match.phases.Length - 1;
+            int secs = Mathf.CeilToInt(Mathf.Max(0f, match.PhaseTimeLeft));
+            string head = match.CurrentPhase.name + "  " + (match.PhaseIndex + 1) + "/" + match.phases.Length + "   " + (secs / 60) + ":" + (secs % 60).ToString("00") +
+                          (match.CurrentPhase.scoreMultiplier > 1f ? "   x" + match.CurrentPhase.scoreMultiplier.ToString("0.##") : "");
+            var hs = new GUIStyle(m_Small) { alignment = TextAnchor.MiddleCenter, fontStyle = FontStyle.Bold };
+            hs.normal.textColor = last ? new Color(1f, 0.6f, 0.3f) : Color.white;
+            GUI.Label(new Rect(b.x, b.y, b.width, 18f), head, hs);
+
+            int n = match.CurrentShare.Length;
+            float gap = 3f, cw = (b.width - 6f - gap * (n - 1)) / n;
+            int localTeam = match.LocalSlot >= 0 ? match.Players[match.LocalSlot].team : -1;
+            for (int t = 0; t < n; t++)
+            {
+                Rect c = new Rect(b.x + 3f + t * (cw + gap), b.y + 18f, cw, 22f);
+                Color tc = match.TeamColor(t);
+                if (t == localTeam) Box(new Rect(c.x - 1.5f, c.y - 1.5f, c.width + 3f, c.height + 3f), Color.white);
+                Box(c, new Color(tc.r * 0.75f, tc.g * 0.75f, tc.b * 0.75f, 0.95f));
+                GUI.Label(c, Short(match.TeamName(t), n > 3 ? 5 : 8) + " " + match.TeamScore(t), m_Center);
+            }
+
+            float x = b.x + 3f, tw = b.width - 6f;
+            for (int t = 0; t < n; t++)
+            {
+                float sw = tw * match.CurrentShare[t];
+                if (sw <= 0.5f) continue;
+                Box(new Rect(x, b.y + 41f, sw, 4f), match.TeamColor(t));
+                x += sw;
+            }
+            Box(new Rect(x, b.y + 41f, b.x + 3f + tw - x, 4f), new Color(0.4f, 0.42f, 0.48f, 0.8f));
+        }
+
+        // ---- top left: the player's own card, buffs and build underneath
+
+        void DrawStatus(HudLayout L)
+        {
+            if (match.LocalSlot < 0) return;
+            TankUnit u = match.Tanks[match.LocalSlot];
+            PlayerStats s = match.Players[match.LocalSlot];
+            Rect r = L.status;
+            Box(r, new Color(0f, 0f, 0f, 0.58f));
+
+            Rect hp = new Rect(r.x + 6f, r.y + 6f, r.width - 12f, 20f);
+            Box(hp, new Color(0f, 0f, 0f, 0.6f));
+            float f = (float)u.Hp / u.maxHp;
+            Box(new Rect(hp.x, hp.y, hp.width * f, hp.height), Color.Lerp(new Color(0.9f, 0.2f, 0.15f), new Color(0.3f, 0.85f, 0.35f), f));
+            GUI.Label(hp, "HP " + u.Hp + " / " + u.maxHp, m_Center);
+
+            string ammo = u.weapon.displayName + (u.IsReloading ? "  RELOADING " + Mathf.RoundToInt(u.ReloadProgress * 100f) + "%" : "  " + u.Ammo + (u.weapon.limitedAmmo ? " shots" : " / " + u.MagazineSize));
+            GUI.Label(new Rect(r.x + 6f, r.y + 29f, r.width - 12f, 18f), ammo, m_Small);
+            string dash = u.Skill == null ? "" : (u.Skill.Ready01 >= 1f ? "   Dash ready" : "   Dash " + Mathf.CeilToInt(u.Skill.CooldownRemaining) + "s");
+            GUI.Label(new Rect(r.x + 6f, r.y + 49f, r.width - 12f, 18f), "K " + s.kills + "  D " + s.deaths + "  A " + s.assists + "   " + s.score + " pts" + (Mobile ? "" : dash), m_Tiny);
+
+            float y = r.yMax + 6f;
+            if (u.ShieldHp > 0) { GUI.Label(new Rect(r.x, y, r.width, 16f), "Shield " + u.ShieldHp + "  " + Mathf.CeilToInt(u.ShieldTimeLeft) + "s", m_Tiny); y += 15f; }
+            if (u.SpeedTimeLeft > 0f) { GUI.Label(new Rect(r.x, y, r.width, 16f), "Speed x" + u.SpeedMultiplier.ToString("0.#") + "  " + Mathf.CeilToInt(u.SpeedTimeLeft) + "s", m_Tiny); y += 15f; }
+            if (u.DamageTimeLeft > 0f) { GUI.Label(new Rect(r.x, y, r.width, 16f), "Damage x" + u.DamageMultiplier.ToString("0.#") + "  " + Mathf.CeilToInt(u.DamageTimeLeft) + "s", m_Tiny); y += 15f; }
+            for (int c = 0; c < u.Cores.Count; c++)
+            {
+                Box(new Rect(r.x, y + 3f, 3f, 10f), u.Cores[c].color);
+                GUI.Label(new Rect(r.x + 7f, y, r.width, 16f), u.Cores[c].name, m_Tiny);
+                y += 15f;
+            }
+        }
+
+        // ---- events
+
+        void DrawLog(HudLayout L)
+        {
+            float y = L.log.y;
+            int shown = 0;
+            for (int i = 0; i < MatchManager.LogSize && shown < 3; i++)
+            {
+                int idx = match.LogIndexFromNewest(i);
+                if (match.Log[idx] == null) continue;
+                float age = Time.time - match.LogTime[idx];
+                if (age > 7f) continue;
+                var st = new GUIStyle(m_Tiny) { alignment = TextAnchor.MiddleCenter };
+                st.normal.textColor = new Color(1f, 1f, 1f, Mathf.Clamp01(1f - (age - 4f) / 3f));
+                GUI.Label(new Rect(L.log.x, y, L.log.width, 16f), match.Log[idx], st);
+                y += 16f;
+                shown++;
+            }
+        }
+
+        void DrawRespawn()
+        {
+            if (match.LocalSlot < 0 || !match.Tanks[match.LocalSlot].IsDead || match.State != MatchManager.MatchState.Playing) return;
+            GUI.Label(new Rect(0f, H * 0.42f, W, 44f), "DESTROYED   respawn in " + Mathf.CeilToInt(match.LocalRespawnIn), m_Big);
+        }
+
+        void DrawStats(HudLayout L)
+        {
+            // frame rate: always shown on a phone while the prototype is being tuned
+            if (!Mobile) return;
+            GUI.Label(new Rect(L.W * 0.5f - 70f, L.safe.yMax - 20f, 140f, 18f), Mathf.RoundToInt(m_FpsSmooth) + " fps   " + (1000f / Mathf.Max(1f, m_FpsSmooth)).ToString("0.0") + " ms", m_Center);
+        }
+
+        // ---- flags that are off screen
+
+        void DrawFlagMarkers(HudLayout L)
+        {
+            if (cam == null) return;
+            Rect[] reserved = L.Reserved();
+            float lo = 22f;
+            Rect area = new Rect(L.safe.x + lo, L.safe.y + lo, L.safe.width - lo * 2f, L.safe.height - lo * 2f);
+            foreach (ControlPoint cp in match.Layout.controlPoints)
+            {
+                Vector3 sp = cam.WorldToScreenPoint(cp.transform.position);
+                bool behind = sp.z < 0f;
+                Vector2 v = ToVirtual(new Vector2(sp.x, sp.y));
+                if (!behind && area.Contains(v)) continue;                   // on screen: the zone itself shows ownership
+                if (behind) v = new Vector2(W - v.x, H - v.y);
+                v = new Vector2(Mathf.Clamp(v.x, area.x, area.xMax), Mathf.Clamp(v.y, area.y, area.yMax));
+                Rect mk = new Rect(v.x - 15f, v.y - 15f, 30f, 30f);
+                bool blocked = false;
+                foreach (Rect rs in reserved) if (rs.Overlaps(mk)) { blocked = true; break; }
+                if (blocked) continue;                                        // the minimap already shows it
+                Color c = cp.Owner >= 0 ? match.TeamColor(cp.Owner) : new Color(0.62f, 0.64f, 0.7f);
+                float pulse = cp.Contested ? 0.6f + 0.4f * Mathf.Sin(Time.unscaledTime * 10f) : 1f;
+                Box(new Rect(mk.x - 2f, mk.y - 2f, 34f, 34f), new Color(0f, 0f, 0f, 0.7f));
+                Box(mk, new Color(c.r, c.g, c.b, pulse));
+                GUI.Label(mk, cp.label, new GUIStyle(m_Label) { alignment = TextAnchor.MiddleCenter });
+            }
+        }
+
+        // ---- minimap (top right)
+
+        void DrawMinimap(Rect r)
+        {
             MapLayout layout = match.Layout;
-            float size = Mobile ? 150f : 230f;
-            Rect r = new Rect(W - size - 14f, H - size - 40f, size, size);
             float half = layout.arenaHalfSize + 2f;
-            float k = size / (2f * half);
-            Box(new Rect(r.x - 2f, r.y - 2f, size + 4f, size + 4f), new Color(0.6f, 0.65f, 0.75f, 0.6f));
-            Box(r, new Color(0.03f, 0.05f, 0.08f, 0.88f));
+            float k = r.width / (2f * half);
+            Box(new Rect(r.x - 2f, r.y - 2f, r.width + 4f, r.height + 4f), new Color(0.6f, 0.65f, 0.75f, 0.6f));
+            Box(r, new Color(0.03f, 0.05f, 0.08f, 0.9f));
 
             if (layout.minimapBlocks != null)
                 foreach (Transform b in layout.minimapBlocks)
                 {
                     if (b == null) continue;
                     Vector3 p = b.position, sc = b.lossyScale;
-                    Box(new Rect(r.x + (p.x - sc.x * 0.5f + half) * k, r.y + (half - p.z - sc.z * 0.5f) * k, Mathf.Max(1.5f, sc.x * k), Mathf.Max(1.5f, sc.z * k)), new Color(0.38f, 0.4f, 0.46f, 0.95f));
+                    Box(new Rect(r.x + (p.x - sc.x * 0.5f + half) * k, r.y + (half - p.z - sc.z * 0.5f) * k, Mathf.Max(1.2f, sc.x * k), Mathf.Max(1.2f, sc.z * k)), new Color(0.38f, 0.4f, 0.46f, 0.95f));
                 }
 
             foreach (Pickup pk in layout.pickups)
             {
                 if (!pk.Available) continue;
                 Vector2 c = new Vector2(r.x + (pk.transform.position.x + half) * k, r.y + (half - pk.transform.position.z) * k);
-                Box(new Rect(c.x - 2.5f, c.y - 2.5f, 5f, 5f), pk.color);
+                Box(new Rect(c.x - 2f, c.y - 2f, 4f, 4f), pk.color);
             }
 
             foreach (ControlPoint cp in layout.controlPoints)
@@ -315,7 +323,7 @@ namespace TankGame.Prototype
                 if (cp.Owner < 0 && cp.Model.Capturer >= 0) col = match.TeamColor(cp.Model.Capturer);
                 Disc(c, rad * Mathf.Clamp01(level), new Color(col.r, col.g, col.b, 0.75f));
                 if (cp.Contested) Disc(c, rad * 1.15f, new Color(1f, 0.9f, 0.3f, 0.35f + 0.3f * Mathf.Sin(Time.unscaledTime * 10f)));
-                GUI.Label(new Rect(c.x - 5f, c.y - 10f, 24f, 22f), cp.label, m_Small);
+                GUI.Label(new Rect(c.x - 5f, c.y - 8f, 20f, 18f), cp.label, m_Tiny);
             }
 
             for (int i = 0; i < match.Tanks.Length; i++)
@@ -324,11 +332,10 @@ namespace TankGame.Prototype
                 if (t.IsDead) continue;
                 Vector2 c = new Vector2(r.x + (t.transform.position.x + half) * k, r.y + (half - t.transform.position.z) * k);
                 bool local = i == match.LocalSlot;
-                if (local) Box(new Rect(c.x - 6f, c.y - 6f, 12f, 12f), Color.white);
-                Box(new Rect(c.x - (local ? 4f : 3f), c.y - (local ? 4f : 3f), local ? 8f : 6f, local ? 8f : 6f), match.TeamColor(t.team));
+                if (local) Box(new Rect(c.x - 5f, c.y - 5f, 10f, 10f), Color.white);
+                Box(new Rect(c.x - (local ? 3.5f : 2.5f), c.y - (local ? 3.5f : 2.5f), local ? 7f : 5f, local ? 7f : 5f), match.TeamColor(t.team));
             }
 
-            // what the camera currently shows
             if (cam != null)
             {
                 Plane ground = new Plane(Vector3.up, Vector3.zero);
@@ -344,6 +351,7 @@ namespace TankGame.Prototype
                 if (ok)
                 {
                     Rect v = new Rect(r.x + (minX + half) * k, r.y + (half - maxZ) * k, (maxX - minX) * k, (maxZ - minZ) * k);
+                    v.xMin = Mathf.Max(v.xMin, r.x); v.yMin = Mathf.Max(v.yMin, r.y); v.xMax = Mathf.Min(v.xMax, r.xMax); v.yMax = Mathf.Min(v.yMax, r.yMax);
                     Color vc = new Color(1f, 1f, 1f, 0.5f);
                     Box(new Rect(v.x, v.y, v.width, 1f), vc); Box(new Rect(v.x, v.yMax - 1f, v.width, 1f), vc);
                     Box(new Rect(v.x, v.y, 1f, v.height), vc); Box(new Rect(v.xMax - 1f, v.y, 1f, v.height), vc);
@@ -351,58 +359,130 @@ namespace TankGame.Prototype
             }
         }
 
-        void DrawLog()
+        // ---- touch controls (bottom corners and right edge)
+
+        void DrawTouchControls(HudLayout L)
         {
-            float y = H * 0.5f - 40f;
-            for (int i = 0; i < MatchManager.LogSize; i++)
+            MobileTankInput m = match.mobileInput;
+            if (m == null || !m.enabled || match.State != MatchManager.MatchState.Playing) return;
+            float R = L.stickR;
+            DrawStick(m.MoveActive ? ToVirtual(m.MoveOrigin) : L.moveHint, m.MoveActive ? ToVirtual(m.MoveNow) : L.moveHint, R, new Color(1f, 1f, 1f, m.MoveActive ? 0.34f : 0.12f), "MOVE");
+            DrawStick(m.AimActive ? ToVirtual(m.AimOrigin) : L.aimHint, m.AimActive ? ToVirtual(m.AimNow) : L.aimHint, R,
+                m.Firing ? new Color(1f, 0.5f, 0.3f, 0.55f) : new Color(1f, 1f, 1f, m.AimActive ? 0.34f : 0.12f), "AIM + FIRE");
+
+            TankUnit u = match.LocalSlot >= 0 ? match.Tanks[match.LocalSlot] : null;
+            float ready = u != null && u.Skill != null ? u.Skill.Ready01 : 1f;
+            DrawButton(L.dashC, L.dashR, "DASH", ready, m.DashHeld, new Color(0.4f, 0.9f, 1f), u != null && u.Skill != null && ready < 1f ? Mathf.CeilToInt(u.Skill.CooldownRemaining).ToString() : null);
+            float reload = u != null && u.IsReloading ? u.ReloadProgress : 1f;
+            DrawButton(L.reloadC, L.reloadR, "RELOAD", reload, m.ReloadHeld, new Color(1f, 0.85f, 0.4f), null);
+        }
+
+        void DrawStick(Vector2 origin, Vector2 now, float radius, Color col, string label)
+        {
+            Disc(origin, radius, new Color(col.r, col.g, col.b, col.a * 0.5f));
+            Vector2 d = Vector2.ClampMagnitude(now - origin, radius);
+            Disc(origin + d, radius * 0.42f, new Color(col.r, col.g, col.b, Mathf.Min(1f, col.a * 2f)));
+            GUI.Label(new Rect(origin.x - radius, origin.y - 9f - radius * 0.0f, radius * 2f, 18f), label, new GUIStyle(m_Tiny) { alignment = TextAnchor.MiddleCenter });
+        }
+
+        void DrawButton(Vector2 c, float r, string label, float fill, bool held, Color tint, string overlayText)
+        {
+            Disc(c, r, new Color(0f, 0f, 0f, 0.55f));
+            if (fill > 0.001f)
             {
-                int idx = match.LogIndexFromNewest(i);
-                if (match.Log[idx] == null || Time.time - match.LogTime[idx] > 7f) continue;
-                GUI.Label(new Rect(14f, y, 520f, 22f), match.Log[idx], m_Small);
-                y += 18f;
+                // fills from the bottom as the cooldown / reload finishes
+                GUI.BeginGroup(new Rect(c.x - r, c.y + r - 2f * r * fill, 2f * r, 2f * r * fill));
+                Disc(new Vector2(r, r - (2f * r - 2f * r * fill)), r, new Color(tint.r, tint.g, tint.b, held ? 0.95f : (fill >= 1f ? 0.6f : 0.4f)));
+                GUI.EndGroup();
+            }
+            GUI.Label(new Rect(c.x - r, c.y - 9f, 2f * r, 18f), overlayText ?? label, new GUIStyle(m_Tiny) { alignment = TextAnchor.MiddleCenter, fontStyle = FontStyle.Bold });
+        }
+
+        // ---- full-screen overlays
+
+        Rect CardRect(int i)
+        {
+            float w = Mathf.Min(260f, (W - 90f) / 3f), h = Mathf.Min(160f, H * 0.42f), gap = Mathf.Min(26f, W * 0.02f);
+            float x0 = (W - (3f * w + 2f * gap)) * 0.5f;
+            return new Rect(x0 + i * (w + gap), H * 0.5f - h * 0.5f + 20f, w, h);
+        }
+
+        void DrawPicking()
+        {
+            Box(new Rect(0f, 0f, W, H), new Color(0.02f, 0.03f, 0.05f, 0.9f));
+            bool last = match.PhaseIndex == match.phases.Length - 1;
+            GUI.Label(new Rect(0f, H * 0.5f - 150f, W, 44f), match.CurrentPhase.name + (last ? "  -  score x" + match.CurrentPhase.scoreMultiplier.ToString("0.##") + ", faster" : ""), m_Big);
+            CoreDef[] offers = match.LocalOffers;
+            if (offers == null)
+            {
+                GUI.Label(new Rect(0f, H * 0.5f - 20f, W, 40f), "Waiting...", m_Big);
+                return;
+            }
+            GUI.Label(new Rect(0f, H * 0.5f - 104f, W, 24f), "Choose a core (" + (Mobile ? "tap" : "1 / 2 / 3 or click") + ")   " + Mathf.CeilToInt(match.PickTimeLeft) + "s", new GUIStyle(m_Label) { alignment = TextAnchor.MiddleCenter });
+            Vector2 mp = Pointer.current != null ? ToVirtual(Pointer.current.position.ReadValue()) : Vector2.zero;
+            for (int i = 0; i < offers.Length; i++)
+            {
+                Rect r = CardRect(i);
+                bool hover = !Mobile && r.Contains(mp);
+                Box(new Rect(r.x - 3f, r.y - 3f, r.width + 6f, r.height + 6f), hover ? Color.white : new Color(1f, 1f, 1f, 0.15f));
+                Box(r, new Color(0.08f, 0.1f, 0.14f, 0.97f));
+                Box(new Rect(r.x, r.y, r.width, 8f), offers[i].color);
+                GUI.Label(new Rect(r.x + 12f, r.y + 16f, r.width - 24f, 26f), (Mobile ? "" : "[" + (i + 1) + "]  ") + offers[i].name, m_Label);
+                GUI.Label(new Rect(r.x + 12f, r.y + 54f, r.width - 24f, r.height - 62f), offers[i].description, m_Wrap);
+            }
+            TankUnit u = match.Tanks[match.LocalSlot];
+            if (u.Cores.Count > 0)
+            {
+                string have = "Your build:  ";
+                for (int c = 0; c < u.Cores.Count; c++) have += (c > 0 ? ", " : "") + u.Cores[c].name;
+                GUI.Label(new Rect(0f, H * 0.5f + 110f, W, 22f), have, m_Center);
             }
         }
 
-        void DrawRespawn()
-        {
-            if (match.LocalSlot < 0 || !match.Tanks[match.LocalSlot].IsDead || match.State != MatchManager.MatchState.Playing) return;
-            GUI.Label(new Rect(0f, H * 0.4f, W, 50f), "DESTROYED   respawn in " + Mathf.CeilToInt(match.LocalRespawnIn), m_Big);
-        }
+        Rect EndButton(int i) { return new Rect(W * 0.5f - 150f + i * 160f, H - 56f, 140f, 38f); }
 
         void DrawEnd()
         {
-            Box(new Rect(0f, 0f, W, H), new Color(0f, 0f, 0f, 0.55f));
+            Box(new Rect(0f, 0f, W, H), new Color(0.02f, 0.03f, 0.05f, 0.92f));
             string title = match.IsDraw ? "DRAW" : match.TeamName(match.WinnerTeam).ToUpperInvariant() + " WINS";
-            GUI.Label(new Rect(0f, 70f, W, 50f), title, m_Big);
-            GUI.Label(new Rect(0f, 112f, W, 24f), match.EndReason + "  -  highest total score wins", new GUIStyle(m_Small) { alignment = TextAnchor.MiddleCenter });
+            GUI.Label(new Rect(0f, 14f, W, 44f), title, m_Big);
+            GUI.Label(new Rect(0f, 56f, W, 20f), match.EndReason + "  -  highest total score wins", m_Center);
+            float y = 82f;
             for (int t = 0; t < match.AverageShare.Length; t++)
             {
-                float y = 146f + t * 22f;
-                Box(new Rect(W * 0.5f - 200f, y + 4f, 12f, 12f), match.TeamColor(t));
-                GUI.Label(new Rect(W * 0.5f - 180f, y - 1f, 560f, 22f),
-                    match.TeamName(t) + "   score " + match.TeamScore(t) + "   (flags +" + Mathf.RoundToInt(match.TeamIncome[t]) + ", players " + match.CombatScore(t) + ")   held " + Mathf.RoundToInt(match.AverageShare[t] * 100f) + "% of the match", m_Label);
+                Box(new Rect(W * 0.5f - 230f, y + 4f, 10f, 10f), match.TeamColor(t));
+                GUI.Label(new Rect(W * 0.5f - 214f, y, 520f, 18f), match.TeamName(t) + "   " + match.TeamScore(t) + " pts   (flags +" + Mathf.RoundToInt(match.TeamIncome[t]) + ", players " + match.CombatScore(t) + ")   held " + Mathf.RoundToInt(match.AverageShare[t] * 100f) + "%", m_Small);
+                y += 18f;
             }
-            DrawScoreboard(new Rect(W * 0.5f - 300f, 146f + match.AverageShare.Length * 22f + 16f, 600f, 260f), true);
-            GUI.Label(new Rect(0f, H - 70f, W, 30f), "F5 restart   M next mode", new GUIStyle(m_Label) { alignment = TextAnchor.MiddleCenter });
+            float tableH = Mathf.Min(H - y - 70f, 24f + match.Players.Length * 20f + 12f);
+            DrawScoreboard(new Rect(W * 0.5f - 300f, y + 6f, 600f, tableH));
+            for (int i = 0; i < 2; i++)
+            {
+                Rect b = EndButton(i);
+                Box(new Rect(b.x - 2f, b.y - 2f, b.width + 4f, b.height + 4f), new Color(1f, 1f, 1f, 0.25f));
+                Box(b, new Color(0.12f, 0.16f, 0.22f, 1f));
+                GUI.Label(b, i == 0 ? "PLAY AGAIN" : "NEXT MODE", new GUIStyle(m_Label) { alignment = TextAnchor.MiddleCenter, fontSize = 14 });
+            }
+            if (!Mobile) GUI.Label(new Rect(0f, H - 20f, W, 18f), "F5 play again   M next mode", m_Center);
         }
 
-        void DrawScoreboard(Rect r, bool background)
+        void DrawScoreboard(Rect r)
         {
-            if (background) Box(r, new Color(0f, 0f, 0f, 0.7f));
+            Box(r, new Color(0f, 0f, 0f, 0.72f));
             m_Order.Clear();
             for (int i = 0; i < match.Players.Length; i++) m_Order.Add(i);
             m_Order.Sort((a, b) => match.Players[b].score.CompareTo(match.Players[a].score));
-            float y = r.y + 8f;
-            GUI.Label(new Rect(r.x + 14f, y, r.width, 22f), "Player                 K   D   A   Cap  Def  Con  Score", m_Small);
-            y += 24f;
+            float y = r.y + 6f;
+            GUI.Label(new Rect(r.x + 22f, y, r.width, 18f), "Player                 K   D   A   Cap  Def  Con  Score", m_Tiny);
+            y += 20f;
             for (int n = 0; n < m_Order.Count; n++)
             {
                 PlayerStats p = match.Players[m_Order[n]];
-                Box(new Rect(r.x + 8f, y + 4f, 8f, 14f), match.TeamColor(p.team));
+                Box(new Rect(r.x + 8f, y + 3f, 8f, 12f), match.TeamColor(p.team));
                 string line = (n == 0 ? "MVP " : "     ") + Pad(p.name, 14) + Pad(p.kills.ToString(), 4) + Pad(p.deaths.ToString(), 4) + Pad(p.assists.ToString(), 4) +
                               Pad(p.captures.ToString(), 5) + Pad(p.defenses.ToString(), 5) + Pad(p.contests.ToString(), 5) + p.score;
-                GUI.Label(new Rect(r.x + 22f, y, r.width, 22f), line, m_Small);
-                y += 22f;
+                GUI.Label(new Rect(r.x + 22f, y, r.width, 18f), line, m_Tiny);
+                y += 20f;
             }
         }
 

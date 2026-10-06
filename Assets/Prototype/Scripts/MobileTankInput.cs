@@ -30,18 +30,12 @@ namespace TankGame.Prototype
         public bool ReloadHeld { get; private set; }
         public int ActiveTouchCount { get; private set; }
 
-        /// <summary>Stick radius in pixels: about 0.45 inch on a phone.</summary>
-        public float StickRadius => Mathf.Max(70f, (Screen.dpi > 0f ? Screen.dpi : 160f) * 0.45f);
+        /// <summary>Stick radius in pixels: about 0.38 inch on a phone.</summary>
+        public float StickRadius => Mathf.Max(70f, (Screen.dpi > 0f ? Screen.dpi : 160f) * 0.38f);
 
-        public Rect DashRect
-        {
-            get { float r = StickRadius; return new Rect(Screen.width - r * 1.0f - r * 1.6f, r * 2.3f, r * 1.0f, r * 1.0f); }
-        }
-
-        public Rect ReloadRect
-        {
-            get { float r = StickRadius; return new Rect(Screen.width - r * 1.0f - r * 0.2f, r * 3.6f, r * 0.9f, r * 0.9f); }
-        }
+        // the HUD lays the buttons out and publishes them here (screen pixels, origin bottom-left), so what is drawn is what is touched
+        public Vector2 DashCenter, ReloadCenter;
+        public float DashRadius, ReloadRadius;
 
         int m_MoveId = -1, m_AimId = -1;
         Vector2 m_AimDir = Vector2.up;
@@ -64,7 +58,6 @@ namespace TankGame.Prototype
             float R = StickRadius;
             bool moveSeen = false, aimSeen = false;
             DashHeld = ReloadHeld = false;
-            Rect dash = DashRect, reload = ReloadRect;
 
             ActiveTouchCount = UnityEngine.InputSystem.EnhancedTouch.Touch.activeTouches.Count;
             foreach (UnityEngine.InputSystem.EnhancedTouch.Touch t in UnityEngine.InputSystem.EnhancedTouch.Touch.activeTouches)
@@ -72,8 +65,8 @@ namespace TankGame.Prototype
                 Vector2 p = t.screenPosition;
                 int id = t.touchId;
 
-                if (dash.Contains(p)) { DashHeld = true; continue; }
-                if (reload.Contains(p)) { ReloadHeld = true; continue; }
+                if (DashRadius > 0f && (p - DashCenter).sqrMagnitude <= DashRadius * DashRadius) { DashHeld = true; continue; }
+                if (ReloadRadius > 0f && (p - ReloadCenter).sqrMagnitude <= ReloadRadius * ReloadRadius) { ReloadHeld = true; continue; }
 
                 if (id == m_MoveId) { MoveNow = p; moveSeen = true; continue; }
                 if (id == m_AimId) { AimNow = p; aimSeen = true; continue; }
@@ -87,8 +80,14 @@ namespace TankGame.Prototype
             AimActive = m_AimId >= 0;
 
             TankCommand cmd = tank.Command;
-            cmd.Move = MoveActive ? Vector2.ClampMagnitude((MoveNow - MoveOrigin) / R, 1f) : Vector2.zero;
-            if (cmd.Move.magnitude < 0.12f) cmd.Move = Vector2.zero;
+            // quick response: full speed from 45% of the stick radius, a small dead zone, a smooth ramp between
+            cmd.Move = Vector2.zero;
+            if (MoveActive)
+            {
+                Vector2 raw = (MoveNow - MoveOrigin) / R;
+                float mag = raw.magnitude;
+                if (mag > 0.08f) cmd.Move = raw / mag * Mathf.SmoothStep(0f, 1f, Mathf.Clamp01((mag - 0.08f) / 0.37f));
+            }
 
             Firing = false;
             if (AimActive)
