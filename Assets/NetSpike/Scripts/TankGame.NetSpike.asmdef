@@ -5,7 +5,8 @@
         "Mirror",
         "Mirror.Transports",
         "kcp2k",
-        "Unity.InputSystem"
+        "Unity.InputSystem",
+        "TankGame.Prototype"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],

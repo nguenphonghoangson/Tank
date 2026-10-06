@@ -25,6 +25,7 @@ namespace TankGame.NetSpike
         public TextMesh hpText;
         public GameObject flash;
         public Material shellMaterial;
+        public GameObject shellPrefab;                // the prototype's projectile look (no Projectile script)
 
         public bool botMode;                          // scripted input instead of the keyboard (automated tests)
 
@@ -167,6 +168,7 @@ namespace TankGame.NetSpike
             int hp = Mathf.Max(0, m_Hp - dmg);
             m_Hp = (byte)hp;
             bool kill = hp == 0;
+            if (kill) RpcExplodeFx(ServerState.pos + Vector3.up * 0.8f); else RpcHitFx(ServerState.pos + Vector3.up * 0.9f);
             if (kill) { ServerDead = true; m_RespawnAt = Time.time + 2f; m_Shield = 0f; m_ShieldTime = 0f; m_DmgTime = 0f; }
             if (confirm && shooter != null && shooter.connectionToClient != null) shooter.TargetHitConfirm(shooter.connectionToClient, fireSeq, travel, kill);
         }
@@ -224,6 +226,7 @@ namespace TankGame.NetSpike
         readonly InputCmd[] m_Recent = new InputCmd[3];
         TankState m_Pred;
         Vector3 m_VisOff;
+        float m_RemoteDashCd;
         TankState m_Prev; bool m_PrevValid;      // state before the last tick, for render interpolation at display rate
         uint m_Seq, m_LastAck;
         byte m_ClientEpoch;
@@ -240,7 +243,18 @@ namespace TankGame.NetSpike
         public bool ClientDead => m_ClientDead;
         readonly bool[] m_ExpectedHit = new bool[256];
 
-        public override void OnStartClient() { if (!All.Contains(this)) All.Add(this); }
+        static readonly Color[] RingColors = { new Color(0.3f, 0.7f, 1f), new Color(1f, 0.4f, 0.35f), new Color(0.45f, 1f, 0.5f), new Color(1f, 0.85f, 0.3f), new Color(0.8f, 0.5f, 1f) };
+        public override void OnStartClient()
+        {
+            if (!All.Contains(this)) All.Add(this);
+            Transform ring = transform.Find("Visual/TeamRing");
+            if (ring != null && ring.TryGetComponent(out Renderer rr))
+            {
+                var mpb = new MaterialPropertyBlock(); rr.GetPropertyBlock(mpb);
+                Color c = RingColors[(int)(netId % (uint)RingColors.Length)]; c.a = 0.8f;
+                mpb.SetColor("_BaseColor", c); rr.SetPropertyBlock(mpb);
+            }
+        }
         public override void OnStopClient() { All.Remove(this); if (Local == this) Local = null; }
         public override void OnStartLocalPlayer() { Local = this; m_BotStart = Time.time; }
 
@@ -283,7 +297,9 @@ namespace TankGame.NetSpike
             SpikeMetrics.DbgTicks++; if (move.sqrMagnitude > 0.01f) SpikeMetrics.DbgMoving++; if (botMode) SpikeMetrics.DbgBotOn++; if (fire) SpikeMetrics.DbgFireWanted++;
             uint view = (uint)Mathf.Max(0, Mathf.RoundToInt(RemoteViewTick > 0f ? RemoteViewTick : LatestServerTick));
             InputCmd c = SpikeSim.MakeCmd(++m_Seq, move, aimYaw, fire && !m_ClientDead, view, dash && !m_ClientDead);
+            float dashBefore = m_Pred.dashCd;
             bool fired = !m_ClientDead && SpikeSim.Step(ref m_Pred, c);
+            if (m_Pred.dashCd > dashBefore && Fx != null) Fx.SpawnDash(m_Pred.pos + Vector3.up * 0.5f, Quaternion.Euler(0f, m_Pred.dashYaw, 0f) * Vector3.forward);
             m_CHist[m_Seq % 256] = new Entry { cmd = c, after = m_Pred, valid = true };
 
             m_Recent[0] = m_Recent[1]; m_Recent[1] = m_Recent[2]; m_Recent[2] = c;
@@ -364,6 +380,8 @@ namespace TankGame.NetSpike
             if (m_LastSnapTime > 0.0) SpikeMetrics.SnapGapMs.Add((float)((now - m_LastSnapTime) * 1000.0));
             m_LastSnapTime = now;
             if (m_Buf.Count > 0 && s.serverTick <= m_Buf[m_Buf.Count - 1].tick) return;
+            if (s.dashCd > m_RemoteDashCd + 0.5f && Fx != null) Fx.SpawnDash(new Vector3(s.x, 0.5f, s.z), Quaternion.Euler(0f, s.dashYaw, 0f) * Vector3.forward);
+            m_RemoteDashCd = s.dashCd;
             m_Buf.Add(new Sample { tick = s.serverTick, state = FromSnap(s) });
             if (m_Buf.Count > 40) m_Buf.RemoveAt(0);
             m_ClientEpoch = s.epoch;
@@ -496,17 +514,49 @@ namespace TankGame.NetSpike
         }
 
         // ------------------------------------------------------------------ cosmetics
+        static TankGame.Prototype.CombatFx s_Fx;
+        public static TankGame.Prototype.CombatFx Fx
+        {
+            get { if (s_Fx == null && !Application.isBatchMode) s_Fx = FindFirstObjectByType<TankGame.Prototype.CombatFx>(); return s_Fx; }
+        }
+
+        [ClientRpc(channel = Channels.Reliable)]
+        void RpcHitFx(Vector3 pos) { if (Fx != null) Fx.SpawnImpact(pos, Vector3.up, true); }
+
+        [ClientRpc(channel = Channels.Reliable)]
+        void RpcExplodeFx(Vector3 pos) { if (Fx != null) Fx.SpawnExplosion(pos); }
+
+        static readonly Color[] ShellColors = { new Color(1f, 0.92f, 0.5f), new Color(1f, 1f, 0.75f), new Color(1f, 0.6f, 0.2f), new Color(1f, 0.35f, 0.15f) };
+        static readonly Vector3[] ShellScale = { Vector3.one, new Vector3(0.5f, 0.5f, 0.8f), new Vector3(0.6f, 0.6f, 0.5f), new Vector3(1.9f, 1.9f, 2.4f) };
+
         void SpawnShell(Vector3 origin, Vector3 dir, float dist, byte weapon)
         {
             if (Application.isBatchMode) return;                 // headless test clients draw nothing
-            var go = GameObject.CreatePrimitive(PrimitiveType.Sphere);
-            Destroy(go.GetComponent<Collider>());
-            go.transform.SetPositionAndRotation(origin, Quaternion.LookRotation(dir));
-            go.transform.localScale = new Vector3(0.25f, 0.25f, 0.9f);
-            if (shellMaterial != null) go.GetComponent<MeshRenderer>().sharedMaterial = shellMaterial;
+            GameObject go;
+            if (shellPrefab != null)
+            {
+                go = Instantiate(shellPrefab, origin, Quaternion.LookRotation(dir));
+                var mr = go.GetComponentInChildren<MeshRenderer>();
+                if (mr != null)
+                {
+                    mr.transform.localScale = new Vector3(0.28f * ShellScale[weapon].x, 0.28f * ShellScale[weapon].y, 1f * ShellScale[weapon].z);
+                    var mpb = new MaterialPropertyBlock(); mr.GetPropertyBlock(mpb); mpb.SetColor("_BaseColor", ShellColors[weapon]); mr.SetPropertyBlock(mpb);
+                }
+                var trail = go.GetComponentInChildren<TrailRenderer>();
+                if (trail != null) { trail.Clear(); trail.startColor = ShellColors[weapon]; trail.endColor = new Color(ShellColors[weapon].r, ShellColors[weapon].g * 0.5f, 0.1f, 0f); trail.widthMultiplier = ShellScale[weapon].x; }
+            }
+            else
+            {
+                go = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+                Destroy(go.GetComponent<Collider>());
+                go.transform.SetPositionAndRotation(origin, Quaternion.LookRotation(dir));
+                go.transform.localScale = new Vector3(0.25f, 0.25f, 0.9f);
+                if (shellMaterial != null) go.GetComponent<MeshRenderer>().sharedMaterial = shellMaterial;
+            }
             var sh = go.AddComponent<SpikeShell>();
-            sh.dir = dir; sh.remaining = dist; sh.speed = SpikeSim.Weapons[weapon].speed;
-            if (weapon == 3) go.transform.localScale = new Vector3(0.6f, 0.6f, 1.6f); else if (weapon == 2) go.transform.localScale = new Vector3(0.18f, 0.18f, 0.4f);
+            sh.dir = dir; sh.remaining = dist; sh.speed = SpikeSim.Weapons[weapon].speed; sh.weapon = weapon;
+            sh.endsOnWall = dist < SpikeSim.Weapons[weapon].range - 0.01f;
+            if (Fx != null) Fx.SpawnMuzzle(origin, dir);
             if (flash != null) { flash.SetActive(true); CancelInvoke(nameof(HideFlash)); Invoke(nameof(HideFlash), 0.05f); }
         }
 
@@ -517,12 +567,19 @@ namespace TankGame.NetSpike
     {
         public Vector3 dir;
         public float remaining, speed = SpikeSim.ShellSpeed;
+        public byte weapon; public bool endsOnWall;
         void Update()
         {
             float step = speed * Time.deltaTime;
             transform.position += dir * Mathf.Min(step, remaining);
             remaining -= step;
-            if (remaining <= 0f) Destroy(gameObject);
+            if (remaining <= 0f)
+            {
+                var fx = SpikeTank.Fx;
+                if (fx != null && weapon == 3) fx.SpawnExplosion(transform.position);
+                else if (fx != null && endsOnWall) fx.SpawnImpact(transform.position, -dir, false);
+                Destroy(gameObject);
+            }
         }
     }
 }

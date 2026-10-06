@@ -32,8 +32,9 @@ namespace TankGame.NetSpike.Editor
             Material turretMat = Lit("Turret", new Color(0.6f, 0.8f, 1f));
             Material barrelMat = Lit("Barrel", new Color(0.85f, 0.87f, 0.9f));
             Material shell = Unlit("Shell", new Color(1f, 0.9f, 0.45f));
-            GameObject prefab = BuildTankPrefab(hull, turretMat, barrelMat, shell);
-            GameObject pickupPrefab = useMap ? BuildPickupPrefab(shell) : null;
+            GameObject shellPrefab = useMap ? BuildShellPrefab() : null;
+            GameObject prefab = useMap ? BuildProtoTankPrefab(shell, shellPrefab) : BuildTankPrefab(hull, turretMat, barrelMat, shell);
+            GameObject pickupPrefab = null;     // built from the map's own item slot, in BuildMap
 
             Scene scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Additive);
             SceneManager.SetActiveScene(scene);
@@ -51,7 +52,7 @@ namespace TankGame.NetSpike.Editor
             camGo.transform.rotation = Quaternion.LookRotation(new Vector3(0f, -22f, 13f).normalized);
 
             Vector3[] mapSpawns = null, mapPickups = null;
-            if (useMap) BuildMap(out mapSpawns, out mapPickups);
+            if (useMap) BuildMap(out mapSpawns, out mapPickups, out pickupPrefab);
             else
             {
                 // arena: 60 x 60 with walls and a few covers (same scene on server and clients, so the simulation sees the same world)
@@ -68,6 +69,7 @@ namespace TankGame.NetSpike.Editor
             var world = new GameObject("World");
             world.AddComponent<SpikeWorld>();
             var server = world.AddComponent<SpikeServer>();
+            if (useMap) { world.AddComponent<SpikeMapVisuals>(); BuildFx(); }
             if (useMap)
             {
                 server.spawnPoints = mapSpawns;
@@ -81,7 +83,7 @@ namespace TankGame.NetSpike.Editor
             var lat = net.AddComponent<LatencySimulation>();
             lat.wrap = kcp;
             lat.enabled = true;
-            net.AddComponent<NetworkManagerHUD>();
+            if (!useMap) net.AddComponent<NetworkManagerHUD>();
             var boot = net.AddComponent<SpikeBootstrap>();
             manager.transport = kcp;
             manager.playerPrefab = prefab;
@@ -101,7 +103,7 @@ namespace TankGame.NetSpike.Editor
         }
 
         /// <summary>The Crossfire map as geometry only: gameplay components are removed (flags, item slots and layout are replaced by the spike's own versions).</summary>
-        static void BuildMap(out Vector3[] spawns, out Vector3[] pickups)
+        static void BuildMap(out Vector3[] spawns, out Vector3[] pickups, out GameObject pickupPrefab)
         {
             var src = AssetDatabase.LoadAssetAtPath<GameObject>(MapPrefabPath);
             var map = (GameObject)PrefabUtility.InstantiatePrefab(src);
@@ -121,39 +123,114 @@ namespace TankGame.NetSpike.Editor
             for (int i = 0; i < slots.arraySize; i++) pickupList.Add(((Component)slots.GetArrayElementAtIndex(i).objectReferenceValue).transform.position);
             spawns = spawnList.ToArray(); pickups = pickupList.ToArray();
 
-            // drop the item slots (visual + trigger) and strip every gameplay script left on the map (flags stay as inert geometry)
+            // the item slot's own models become the networked item prefab; then strip gameplay scripts (flags keep ControlPoint for their visuals only)
             Transform slotsRoot = map.transform.Find("Pickups");
-            if (slotsRoot != null) Object.DestroyImmediate(slotsRoot.gameObject);
-            foreach (MonoBehaviour mb in map.GetComponentsInChildren<MonoBehaviour>(true)) if (mb != null) Object.DestroyImmediate(mb);
+            pickupPrefab = BuildPickupPrefab(slotsRoot.GetChild(0).gameObject);
+            Object.DestroyImmediate(slotsRoot.gameObject);
+            foreach (MonoBehaviour mb in map.GetComponentsInChildren<MonoBehaviour>(true)) if (mb != null && mb.GetType().Name != "ControlPoint") Object.DestroyImmediate(mb);
             Debug.Log("Map imported: " + spawns.Length + " spawn points, " + pickups.Length + " item slots");
         }
 
-        static GameObject BuildPickupPrefab(Material mat)
+        /// <summary>The prototype's item slot (all seven item models as children) turned into a networked item.</summary>
+        static GameObject BuildPickupPrefab(GameObject slot)
         {
-            var root = new GameObject("SpikePickup");
+            var root = Object.Instantiate(slot);
+            root.name = "SpikePickup";
+            root.transform.SetPositionAndRotation(Vector3.zero, Quaternion.identity);
+            foreach (MonoBehaviour mb in root.GetComponentsInChildren<MonoBehaviour>(true)) Object.DestroyImmediate(mb);
+            foreach (Collider c in root.GetComponentsInChildren<Collider>(true)) Object.DestroyImmediate(c);
             root.AddComponent<NetworkIdentity>();
             var pk = root.AddComponent<SpikePickup>();
-            var orb = GameObject.CreatePrimitive(PrimitiveType.Sphere);
-            Object.DestroyImmediate(orb.GetComponent<Collider>());
-            orb.name = "Orb";
-            orb.transform.SetParent(root.transform, false);
-            orb.transform.localPosition = new Vector3(0f, 1.1f, 0f);
-            orb.transform.localScale = new Vector3(1.1f, 1.1f, 1.1f);
-            orb.GetComponent<MeshRenderer>().sharedMaterial = mat;
+            string[] keys = { null, "Variant_Repair_", "Variant_Shield_", "Variant_Speed_", "Variant_Damage_", "Variant_Weapon_MACHINE_GUN", "Variant_Weapon_SHOTGUN", "Variant_Weapon_ROCKET" };
+            pk.variantRoots = new GameObject[keys.Length];
+            foreach (Transform child in root.transform)
+            {
+                child.gameObject.SetActive(false);
+                for (int i = 1; i < keys.Length; i++) if (child.name.StartsWith(keys[i])) pk.variantRoots[i] = child.gameObject;
+            }
+            for (int i = 1; i < keys.Length; i++) if (pk.variantRoots[i] == null) Debug.LogError("Item model missing for " + keys[i]);
+
             var lab = new GameObject("Label");
             lab.transform.SetParent(root.transform, false);
-            lab.transform.localPosition = new Vector3(0f, 2.6f, 0f);
+            lab.transform.localPosition = new Vector3(0f, 2.9f, 0f);
             lab.transform.rotation = Quaternion.Euler(59.4f, 0f, 0f);
             var tm = lab.AddComponent<TextMesh>();
             tm.fontSize = 48; tm.characterSize = 0.12f; tm.anchor = TextAnchor.MiddleCenter; tm.alignment = TextAlignment.Center;
             Font font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
             tm.font = font;
             lab.GetComponent<MeshRenderer>().sharedMaterial = font.material;
-            pk.orb = orb.GetComponent<Renderer>();
             pk.label = tm;
             var prefab = PrefabUtility.SaveAsPrefabAsset(root, Root + "/Prefabs/SpikePickup.prefab");
             Object.DestroyImmediate(root);
             return prefab;
+        }
+
+        /// <summary>The prototype's projectile look (mesh and trail) without its flight and hit script.</summary>
+        static GameObject BuildShellPrefab()
+        {
+            var src = AssetDatabase.LoadAssetAtPath<GameObject>("Assets/Prototype/Prefabs/Projectile.prefab");
+            var go = (GameObject)PrefabUtility.InstantiatePrefab(src);
+            PrefabUtility.UnpackPrefabInstance(go, PrefabUnpackMode.Completely, InteractionMode.AutomatedAction);
+            go.name = "SpikeShell";
+            foreach (MonoBehaviour mb in go.GetComponentsInChildren<MonoBehaviour>(true)) Object.DestroyImmediate(mb);
+            foreach (Collider c in go.GetComponentsInChildren<Collider>(true)) Object.DestroyImmediate(c);
+            var prefab = PrefabUtility.SaveAsPrefabAsset(go, Root + "/Prefabs/SpikeShell.prefab");
+            Object.DestroyImmediate(go);
+            return prefab;
+        }
+
+        /// <summary>The prototype's tank model (hull, tracks, turret, team ring) with all gameplay components removed.</summary>
+        static GameObject BuildProtoTankPrefab(Material shell, GameObject shellPrefab)
+        {
+            var src = AssetDatabase.LoadAssetAtPath<GameObject>("Assets/Prototype/Prefabs/Tank_Match.prefab");
+            var root = (GameObject)PrefabUtility.InstantiatePrefab(src);
+            PrefabUtility.UnpackPrefabInstance(root, PrefabUnpackMode.Completely, InteractionMode.AutomatedAction);
+            root.name = "SpikeTank";
+            Transform bar = root.transform.Find("HealthBar");
+            if (bar != null) Object.DestroyImmediate(bar.gameObject);
+            foreach (MonoBehaviour mb in root.GetComponentsInChildren<MonoBehaviour>(true)) if (mb != null && mb.GetType().Name != "TankUnit") Object.DestroyImmediate(mb);
+            foreach (MonoBehaviour mb in root.GetComponentsInChildren<MonoBehaviour>(true)) if (mb != null) Object.DestroyImmediate(mb);
+            foreach (Rigidbody rb in root.GetComponentsInChildren<Rigidbody>(true)) Object.DestroyImmediate(rb);
+            foreach (Collider c in root.GetComponentsInChildren<Collider>(true)) Object.DestroyImmediate(c);
+
+            root.AddComponent<NetworkIdentity>();
+            var tank = root.AddComponent<SpikeTank>();
+            tank.visual = root.transform.Find("Visual");
+            tank.turret = root.transform.Find("Visual/TurretPivot");
+
+            var hp = new GameObject("HpText");
+            hp.transform.SetParent(root.transform, false);
+            hp.transform.localPosition = new Vector3(0f, 3.4f, 0f);
+            var tm = hp.AddComponent<TextMesh>();
+            tm.text = "100"; tm.fontSize = 48; tm.characterSize = 0.2f; tm.anchor = TextAnchor.MiddleCenter; tm.alignment = TextAlignment.Center;
+            Font font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+            tm.font = font;
+            hp.GetComponent<MeshRenderer>().sharedMaterial = font.material;
+            hp.transform.rotation = Quaternion.Euler(59.4f, 0f, 0f);
+            tank.hpText = tm;
+            tank.shellMaterial = shell;
+            tank.shellPrefab = shellPrefab;
+
+            var prefab = PrefabUtility.SaveAsPrefabAsset(root, Root + "/Prefabs/SpikeTank.prefab");
+            Object.DestroyImmediate(root);
+            return prefab;
+        }
+
+        static T Load<T>(string path) where T : Component { return AssetDatabase.LoadAssetAtPath<GameObject>(path).GetComponent<T>(); }
+
+        /// <summary>The prototype's effect prefabs, played through its own CombatFx (muzzle, impact, hit, explosion, dash, pickup).</summary>
+        static void BuildFx()
+        {
+            const string P = "Assets/Prototype/Prefabs/";
+            var go = new GameObject("CombatFx");
+            var fx = go.AddComponent<TankGame.Prototype.CombatFx>();
+            fx.projectilePrefab = Load<TankGame.Prototype.Projectile>(P + "Projectile.prefab");
+            fx.muzzlePrefab = Load<TankGame.Prototype.PooledFx>(P + "Fx_MuzzleFlash.prefab");
+            fx.impactPrefab = Load<TankGame.Prototype.PooledFx>(P + "Fx_Impact.prefab");
+            fx.hitPrefab = Load<TankGame.Prototype.PooledFx>(P + "Fx_Hit.prefab");
+            fx.explosionPrefab = Load<TankGame.Prototype.PooledFx>(P + "Fx_Explosion.prefab");
+            fx.pickupPrefab = Load<TankGame.Prototype.PooledFx>(P + "Fx_Pickup.prefab");
+            fx.dashPrefab = Load<TankGame.Prototype.PooledFx>(P + "Fx_Dash.prefab");
         }
 
         static GameObject BuildTankPrefab(Material hull, Material turretMat, Material barrelMat, Material shell)

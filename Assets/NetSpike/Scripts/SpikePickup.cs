@@ -17,11 +17,10 @@ namespace TankGame.NetSpike
         static readonly float[] Respawn = { 0f, 25f, 30f, 30f, 40f, 35f, 35f, 45f };
 
         [SyncVar(hook = nameof(OnVariant))] public byte variant;
-        public Renderer orb;
+        public GameObject[] variantRoots;     // indexed by variant (the prototype's own item models, one child per kind)
         public TextMesh label;
 
         float m_RespawnAt;
-        MaterialPropertyBlock m_Block;
 
         public bool Available => variant != 0;
         public Kind CurrentKind => (Kind)variant;
@@ -56,23 +55,26 @@ namespace TankGame.NetSpike
 
         void ApplyVariant()
         {
-            bool on = variant != 0;
-            if (orb != null) orb.gameObject.SetActive(on);
-            if (label != null) { label.gameObject.SetActive(on); label.text = Labels[variant]; }
-            if (on && orb != null)
+            if (variantRoots != null)
+                for (int i = 1; i < variantRoots.Length; i++) if (variantRoots[i] != null) variantRoots[i].SetActive(i == variant);
+            if (label != null) { label.gameObject.SetActive(variant != 0); label.text = Labels[variant]; }
+            m_Visual = variant != 0 && variantRoots != null && variantRoots[variant] != null ? variantRoots[variant].transform.Find("Visual") : null;
+            if (m_Visual != null) m_VisualRest = m_Visual.localPosition;
+            if (m_ShownVariant != 0 && variant == 0 && !Application.isBatchMode)
             {
-                if (m_Block == null) m_Block = new MaterialPropertyBlock();
-                orb.GetPropertyBlock(m_Block);
-                m_Block.SetColor("_BaseColor", Colors[variant]); m_Block.SetColor("_Color", Colors[variant]);
-                orb.SetPropertyBlock(m_Block);
+                var fx = Object.FindFirstObjectByType<TankGame.Prototype.CombatFx>();
+                if (fx != null) fx.SpawnPickup(transform.position + Vector3.up * 0.6f);
             }
+            m_ShownVariant = variant;
         }
+
+        Transform m_Visual; Vector3 m_VisualRest; byte m_ShownVariant;
 
         void Update()
         {
-            if (variant == 0 || orb == null || Application.isBatchMode) return;
-            orb.transform.Rotate(0f, 120f * Time.deltaTime, 0f, Space.World);
-            orb.transform.localPosition = new Vector3(0f, 1.1f + 0.15f * Mathf.Sin(Time.time * 3f), 0f);
+            if (m_Visual == null || Application.isBatchMode) return;
+            m_Visual.Rotate(0f, 120f * Time.deltaTime, 0f, Space.Self);
+            m_Visual.localPosition = m_VisualRest + new Vector3(0f, 0.15f * Mathf.Sin(Time.time * 3f), 0f);
         }
     }
 }
