@@ -21,6 +21,8 @@ namespace TankGame.Prototype
         public CombatFx fx;
         public CameraRig cameraRig;
         public PlayerTankInput localInput;
+        public MobileTankInput mobileInput;
+        public bool forceMobileControls;   // use touch controls even when not on a phone (editor tests)
         public MatchMode mode = MatchMode.TwoTeams2v2;
         public bool allBots;             // test switch: the local player is driven by a bot too
         public bool coresEnabled = true; // test switch: skip core picking
@@ -84,8 +86,15 @@ namespace TankGame.Prototype
         float m_PickEnds;
         int m_LogHead;
 
+        public bool UseTouch => Application.isMobilePlatform || forceMobileControls;
+
         void Start()
         {
+            if (Application.isMobilePlatform)
+            {
+                Application.targetFrameRate = 60;
+                Screen.sleepTimeout = SleepTimeout.NeverSleep;
+            }
             StartMatch(MatchConfig.Preset(mode));
         }
 
@@ -183,12 +192,14 @@ namespace TankGame.Prototype
                 }
             }
 
-            if (LocalSlot >= 0 && !allBots)
+            bool human = LocalSlot >= 0 && !allBots;
+            if (localInput != null) localInput.enabled = false;
+            if (mobileInput != null) mobileInput.enabled = false;
+            if (human)
             {
-                localInput.tank = Tanks[LocalSlot];
-                localInput.enabled = true;
+                if (UseTouch && mobileInput != null) { mobileInput.tank = Tanks[LocalSlot]; mobileInput.enabled = true; }
+                else { localInput.tank = Tanks[LocalSlot]; localInput.enabled = true; }
             }
-            else if (localInput != null) localInput.enabled = false;
             if (cameraRig != null) cameraRig.target = LocalSlot >= 0 ? Tanks[LocalSlot].transform : Tanks[0].transform;
 
             State = MatchState.Playing;
@@ -486,6 +497,7 @@ namespace TankGame.Prototype
                 Tanks[i].Command = default;
             }
             if (localInput != null) localInput.enabled = false;
+            if (mobileInput != null) mobileInput.enabled = false;
             AddLog(IsDraw ? "Draw" : TeamName(WinnerTeam) + " wins (" + reason + ")");
         }
 

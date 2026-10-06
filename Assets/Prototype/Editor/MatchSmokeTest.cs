@@ -4,6 +4,8 @@ using System.Text;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
+using UnityEngine.InputSystem;
+using UnityEngine.InputSystem.LowLevel;
 using UnityEngine.Rendering;
 using UnityEngine.SceneManagement;
 
@@ -47,6 +49,10 @@ namespace TankGame.Prototype.Editor
         static bool s_RevertedToPrimary, s_FlagDecayed;
         static float s_SpeedMult, s_DamageMult, s_FlagDecayAt = -1f;
         static double s_PhaseT;
+        static Touchscreen s_Touch;
+        static float s_TouchMoved, s_TouchAimDot, s_TouchDashCd;
+        static bool s_TouchFired, s_TouchIdle, s_TouchSticksSeen;
+        static int s_TouchShots, s_TouchCountSeen, s_TouchDevices;
         static int s_MaxPhase, s_CoresMin, s_PickState = -1, s_PickScale = -1, s_PickCores = -1, s_ItemKinds;
         static string s_OffersA, s_OffersB, s_ItemsA, s_ItemsB;
         static bool s_WinnerTopScore, s_FinalMultiplier;
@@ -226,6 +232,64 @@ namespace TankGame.Prototype.Editor
                     }
                     break;
                 }
+                case 40: // touch controls with simulated multi-touch: left stick drives, right stick aims and fires, dash button
+                {
+                    if (s_Phase == 0)
+                    {
+                        InputSystem.settings.editorInputBehaviorInPlayMode = InputSettings.EditorInputBehaviorInPlayMode.AllDeviceInputAlwaysGoesToGameView;
+                        s_Touch = InputSystem.AddDevice<Touchscreen>();
+                        s_Match.allBots = false; s_Match.coresEnabled = false; s_Match.forceMobileControls = true;
+                        s_Match.StartMatch(MatchConfig.Preset(MatchMode.TwoTeams2v2));
+                        s_Rig.target = s_Anchor.transform;
+                        s_Tank = s_Match.Tanks[s_Match.LocalSlot];
+                        s_Tank.Respawn(new Vector3(-40f, 0f, -52f), Quaternion.identity);
+                        s_ShotsFired = 0; s_Tank.Fired += u => s_TouchShots++;
+                        s_TouchShots = 0;
+                        s_Pos0 = s_Tank.transform.position;
+                        var m = s_Match.mobileInput;
+                        s_TouchSticksSeen = m != null && m.enabled;
+                        float y = Screen.height * 0.3f, R = m.StickRadius;
+                        Touch(1, new Vector2(Screen.width * 0.2f, y), UnityEngine.InputSystem.TouchPhase.Began);
+                        Touch(2, new Vector2(Screen.width * 0.8f, y), UnityEngine.InputSystem.TouchPhase.Began);
+                        s_PhaseT = now; s_Phase = 1;
+                    }
+                    else if (s_Phase == 1 && now - s_PhaseT > 0.2)
+                    {
+                        float y = Screen.height * 0.3f, R = s_Match.mobileInput.StickRadius;
+                        Touch(1, new Vector2(Screen.width * 0.2f + R, y), UnityEngine.InputSystem.TouchPhase.Moved);          // push the move stick right
+                        Touch(2, new Vector2(Screen.width * 0.8f, y + R), UnityEngine.InputSystem.TouchPhase.Moved);          // push the aim stick up
+                        s_PhaseT = now; s_Phase = 2;
+                    }
+                    else if (s_Phase == 2 && now - s_PhaseT > 1.0)
+                    {
+                        s_TouchCountSeen = s_Match.mobileInput.ActiveTouchCount; s_TouchDevices = InputSystem.devices.Count;
+                        s_TouchMoved = s_Tank.transform.position.x - s_Pos0.x;
+                        Vector3 aim = s_Tank.Command.AimPoint - s_Tank.transform.position; aim.y = 0f;
+                        s_TouchAimDot = Vector3.Dot(aim.normalized, Vector3.forward);
+                        s_TouchFired = s_TouchShots > 0;
+                        // release both, then tap the dash button
+                        float y = Screen.height * 0.3f, R = s_Match.mobileInput.StickRadius;
+                        Touch(1, new Vector2(Screen.width * 0.2f + R, y), UnityEngine.InputSystem.TouchPhase.Ended);
+                        Touch(2, new Vector2(Screen.width * 0.8f, y + R), UnityEngine.InputSystem.TouchPhase.Ended);
+                        s_PhaseT = now; s_Phase = 3;
+                    }
+                    else if (s_Phase == 3 && now - s_PhaseT > 0.4)
+                    {
+                        s_TouchIdle = s_Tank.Command.Move == Vector2.zero && !s_Tank.Command.Fire;
+                        Rect d = s_Match.mobileInput.DashRect;
+                        Touch(3, d.center, UnityEngine.InputSystem.TouchPhase.Began);
+                        s_PhaseT = now; s_Phase = 4;
+                    }
+                    else if (s_Phase == 4 && now - s_PhaseT > 0.3)
+                    {
+                        s_TouchDashCd = s_Tank.Skill.CooldownRemaining;
+                        Touch(3, s_Match.mobileInput.DashRect.center, UnityEngine.InputSystem.TouchPhase.Ended);
+                        InputSystem.RemoveDevice(s_Touch);
+                        s_Match.forceMobileControls = false; s_Match.allBots = true;
+                        s_Phase = 0; s_Step = 10;
+                    }
+                    break;
+                }
                 case 30: // same seed => same core offers and same item roll; different seed => different
                 {
                     s_Match.allBots = true; s_Match.coresEnabled = true; s_Match.seed = 1234;
@@ -247,7 +311,7 @@ namespace TankGame.Prototype.Editor
                     s_Match.PickCore(1);
                     s_PickCores = s_Match.Tanks[s_Match.LocalSlot].Cores.Count;   // expect 1
                     s_Match.allBots = true; s_Match.coresEnabled = false;
-                    s_Step = 10;
+                    s_Phase = 0; s_Step = 40;
                     break;
                 }
                 case 10: // mechanics: dash, magazine/reload, repair pickup on a bot-free 2v2
@@ -400,6 +464,15 @@ namespace TankGame.Prototype.Editor
             }
         }
 
+        static void Touch(int id, Vector2 pos, UnityEngine.InputSystem.TouchPhase phase)
+        {
+            InputSystem.QueueStateEvent(s_Touch, new TouchState
+            {
+                touchId = id, phase = phase, position = pos, startPosition = pos, pressure = phase == UnityEngine.InputSystem.TouchPhase.Ended ? 0f : 1f, startTime = Time.timeAsDouble,
+            });
+            InputSystem.Update();
+        }
+
         static string Offers()
         {
             var sb = new StringBuilder();
@@ -480,6 +553,8 @@ namespace TankGame.Prototype.Editor
               .Append(",\"flag_income_total\":").Append(F(s_IncomeTotal)).Append("},\n  \"randomness\": {\"same_seed_same_offers\":").Append(s_OffersA == s_OffersB ? "true" : "false")
               .Append(",\"same_seed_same_items\":").Append(s_ItemsA == s_ItemsB ? "true" : "false").Append(",\"item_types_present\":").Append(s_ItemKinds)
               .Append("},\n  \"human_pick\": {\"state_while_picking\":").Append(s_PickState).Append(",\"timescale_x10\":").Append(s_PickScale).Append(",\"cores_after_pick\":").Append(s_PickCores)
+              .Append("},\n  \"touch\": {\"controls_enabled\":").Append(s_TouchSticksSeen ? "true" : "false").Append(",\"moved_right_m\":").Append(F(s_TouchMoved)).Append(",\"aim_up_dot\":").Append(F(s_TouchAimDot))
+              .Append(",\"active_touches_seen\":").Append(s_TouchCountSeen).Append(",\"touchscreens\":").Append(s_TouchDevices).Append(",\"fired\":").Append(s_TouchFired ? "true" : "false").Append(",\"idle_after_release\":").Append(s_TouchIdle ? "true" : "false").Append(",\"dash_cooldown_after_tap\":").Append(F(s_TouchDashCd))
               .Append("},\n  \"mechanics\": {\"dash_distance_m\":").Append(F(s_DashDistance)).Append(",\"dash_cooldown_left_s\":").Append(F(s_DashCooldown))
               .Append(",\"shots_before_reload\":").Append(s_ShotsBeforeReload).Append(",\"ammo_when_reload_started\":").Append(s_AmmoAtReload).Append(",\"reload_seconds\":").Append(F(s_ReloadSeconds))
               .Append(",\"ammo_after_reload\":").Append(s_AmmoAfterReload).Append(",\"hp_before_pickup\":").Append(s_HpBefore).Append(",\"hp_after_pickup\":").Append(s_HpAfter)

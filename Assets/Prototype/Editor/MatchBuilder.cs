@@ -135,6 +135,10 @@ namespace TankGame.Prototype.Editor
             input.reticle = ret.transform;
             input.enabled = false;
 
+            var mobileGo = new GameObject("MobilePlayerInput");
+            var mobile = mobileGo.AddComponent<MobileTankInput>();
+            mobile.enabled = false;
+
             var matchGo = new GameObject("Match");
             var match = matchGo.AddComponent<MatchManager>();
             match.map = mapDef;
@@ -143,6 +147,7 @@ namespace TankGame.Prototype.Editor
             match.fx = fx;
             match.cameraRig = rig;
             match.localInput = input;
+            match.mobileInput = mobile;
             var hud = matchGo.AddComponent<MatchHud>();
             hud.match = match;
             hud.cam = cam;
