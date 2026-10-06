@@ -115,6 +115,72 @@ namespace TankGame.NetSpike
                 GUI.Box(r, cd > 0.05f ? "DASH\n" + cd.ToString("0.0") : "DASH");
             }
             if (me == null && NetworkClient.active) GUI.Label(new Rect(10f, 10f, 400f, 24f), "connecting...");
+            if (SpikeMatch.I != null) DrawMatchHud();
+        }
+
+        GUIStyle m_Style;
+        static Texture2D Dot { get { return Texture2D.whiteTexture; } }
+
+        void Fill(Rect r, Color c) { Color old = GUI.color; GUI.color = c; GUI.DrawTexture(r, Dot); GUI.color = old; }
+
+        void DrawMatchHud()
+        {
+            SpikeMatch m = SpikeMatch.I;
+            float k = Mathf.Max(1f, Screen.height / 540f);
+            if (m_Style == null) m_Style = new GUIStyle(GUI.skin.label) { alignment = TextAnchor.MiddleCenter, fontStyle = FontStyle.Bold };
+            m_Style.fontSize = Mathf.RoundToInt(15f * k);
+
+            // top centre: team scores and clock
+            float w = 150f * k, h = 26f * k, cx = Screen.width * 0.5f;
+            Fill(new Rect(cx - w * 1.5f, 4f * k, w * 3f, h), new Color(0f, 0f, 0f, 0.45f));
+            m_Style.normal.textColor = SpikeMatch.TeamColors[0]; GUI.Label(new Rect(cx - w * 1.5f, 4f * k, w, h), SpikeMatch.TeamNames[0] + " " + m.score0, m_Style);
+            m_Style.normal.textColor = Color.white; GUI.Label(new Rect(cx - w * 0.5f, 4f * k, w, h), (m.timeLeft / 60) + ":" + (m.timeLeft % 60).ToString("00"), m_Style);
+            m_Style.normal.textColor = SpikeMatch.TeamColors[1]; GUI.Label(new Rect(cx + w * 0.5f, 4f * k, w, h), SpikeMatch.TeamNames[1] + " " + m.score1, m_Style);
+
+            // flag strip: one box per flag, owner colour, fill shows hold or capture progress
+            int n = m.Points.Length; float fw = 30f * k, fy = 4f * k + h + 3f * k;
+            for (int i = 0; i < n && i < m.flags.Count; i++)
+            {
+                FlagSync f = m.flags[i];
+                Rect r = new Rect(cx - n * fw * 0.5f + i * fw + 2f, fy, fw - 4f, fw - 4f);
+                Fill(r, new Color(0f, 0f, 0f, 0.5f));
+                int team = f.owner >= 0 ? f.owner : f.capturer;
+                float level = f.owner >= 0 ? f.hold / 255f : f.progress / 255f;
+                if (team >= 0) Fill(new Rect(r.x, r.yMax - r.height * level, r.width, r.height * level), SpikeMatch.TeamColors[team]);
+                m_Style.normal.textColor = f.contested ? Color.yellow : Color.white; m_Style.fontSize = Mathf.RoundToInt(13f * k);
+                GUI.Label(r, m.Points[i].label, m_Style);
+            }
+
+            // minimap, top right
+            SpikeMapVisuals mv = SpikeMapVisuals.I;
+            float S = Mathf.Min(Screen.width, Screen.height) * 0.28f;
+            var map = new Rect(Screen.width - S - 8f * k, 8f * k, S, S);
+            Fill(map, new Color(0f, 0f, 0f, 0.5f));
+            float half = mv != null ? mv.half : 60f;
+            System.Func<Vector3, Vector2> P = wp => new Vector2(map.x + (wp.x / half * 0.5f + 0.5f) * S, map.y + (0.5f - wp.z / half * 0.5f) * S);
+            if (mv != null)
+                foreach (Vector4 b in mv.blocks)
+                {
+                    Vector2 c = P(new Vector3(b.x, 0f, b.y)); float bw = b.z / half * 0.5f * S, bh = b.w / half * 0.5f * S;
+                    Fill(new Rect(c.x - bw * 0.5f, c.y - bh * 0.5f, bw, bh), new Color(0.55f, 0.5f, 0.4f, 0.8f));
+                }
+            for (int i = 0; i < n && i < m.flags.Count; i++)
+            {
+                FlagSync f = m.flags[i]; Vector2 c = P(m.Points[i].transform.position); float d = 9f * k;
+                Fill(new Rect(c.x - d * 0.5f, c.y - d * 0.5f, d, d), f.owner >= 0 ? SpikeMatch.TeamColors[f.owner] : new Color(0.7f, 0.7f, 0.75f));
+            }
+            foreach (SpikeTank t in SpikeTank.All)
+            {
+                if (t == null || t.ClientDead || t.RenderPos == Vector3.zero) continue;
+                Vector2 c = P(t.RenderPos); float d = (t == SpikeTank.Local ? 7f : 5f) * k;
+                Fill(new Rect(c.x - d * 0.5f, c.y - d * 0.5f, d, d), t == SpikeTank.Local ? Color.white : SpikeMatch.TeamColors[SpikeMatch.TeamOf(t.netId)]);
+            }
+
+            if (m.winner != -2)
+            {
+                m_Style.fontSize = Mathf.RoundToInt(30f * k); m_Style.normal.textColor = m.winner >= 0 ? SpikeMatch.TeamColors[m.winner] : Color.white;
+                GUI.Label(new Rect(0f, Screen.height * 0.35f, Screen.width, 50f * k), m.winner >= 0 ? SpikeMatch.TeamNames[m.winner] + " WINS" : "DRAW", m_Style);
+            }
         }
     }
 }

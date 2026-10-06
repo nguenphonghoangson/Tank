@@ -60,3 +60,15 @@ Server bandwidth rose to ~7.5 KB/s out (snapshot carries dash/speed/shield field
 ### Weapons (MG, Shotgun, Rocket)
 
 Weapon and ammo are part of the predicted tank state; pellet directions are a deterministic function of the input sequence number, so the shooter's screen and the server agree on spread. Server resolves each pellet with lag compensation, rocket splash is applied at impact time against current positions (not lag compensated). The cannon stays unlimited with no splash (no reload yet). 60 s, 2 bots: server accepted exactly the shots clients predicted at LAN and 204 ms (259/259, 270/270), 290 vs 296 at 152 ms; corrections 4–14 /min. The rocket was never picked up in these runs (rarest item), so rocket splash is untested. MG fires every 3 ticks (10/s) instead of 11.8/s because of the 30 Hz tick.
+
+### Prototype prefabs, flags, score and HUD
+
+`NetSpike_Match` now uses the prototype's own prefabs for the tank, item models, projectile, effects and flags. Flags run the prototype's `CapturePointModel` on the server (10 s capture, 45 s decay, two teams by netId parity), score comes from captures (100), kills (50) and flag income (3/s per flag), with a 300 s clock that restarts 10 s after the end. Flag state is synced as 5 bytes per flag, only on change. The screen has score and clock, a flag strip, a minimap and a winner banner; bots now go for flags when no item is near. 90 s, 2 bots:
+
+| Condition | Flags captured | Score blue/red | Corrections /min | Agreed hits | Server accepted / predicted shots |
+|---|---|---|---|---|---|
+| LAN | 2 | 648 / 200 | 6.7, 5.3 | 47/56, 23/29 | 284 / 286 |
+| RTT ~151 ms | 1 | 567 / 150 | 7.3, 8.7 | 43/57, 33/40 | 231 / 238 |
+| RTT ~204 ms, 2% loss | 2 | 436 / 484 | 12.0, 11.3 | 70/77, 32/50 | 316 / 329 |
+
+Server out ~8.5 KB/s for 2 clients. Still missing: tank-vs-tank collision, cores, phases, bots as server-side AI, kill points for assists/defense, real network and iPhone measurements.

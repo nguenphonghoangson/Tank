@@ -1,16 +1,13 @@
-using TankGame.Prototype;
 using UnityEngine;
 
 namespace TankGame.NetSpike
 {
-    /// <summary>Flags from the real map are drawn neutral for now (their capture state is not networked yet).</summary>
+    /// <summary>Map data the screen needs for the minimap (cover blocks as x, z, size x, size z), filled in by the builder.</summary>
     public sealed class SpikeMapVisuals : MonoBehaviour
     {
-        void Start()
-        {
-            if (Application.isBatchMode) return;
-            var colors = new[] { new Color(0.3f, 0.7f, 1f), new Color(1f, 0.4f, 0.35f), new Color(0.45f, 1f, 0.5f) };
-            foreach (ControlPoint cp in FindObjectsByType<ControlPoint>(FindObjectsSortMode.None)) cp.Init(colors, 10f, 45f);
-        }
+        public static SpikeMapVisuals I { get; private set; }
+        public Vector4[] blocks = new Vector4[0];
+        public float half = 60f;
+        void Awake() { I = this; }
     }
 }

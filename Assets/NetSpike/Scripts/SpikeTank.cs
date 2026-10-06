@@ -168,6 +168,7 @@ namespace TankGame.NetSpike
             int hp = Mathf.Max(0, m_Hp - dmg);
             m_Hp = (byte)hp;
             bool kill = hp == 0;
+            if (kill && shooter != null && SpikeMatch.I != null) SpikeMatch.I.ServerKill(shooter, this);
             if (kill) RpcExplodeFx(ServerState.pos + Vector3.up * 0.8f); else RpcHitFx(ServerState.pos + Vector3.up * 0.9f);
             if (kill) { ServerDead = true; m_RespawnAt = Time.time + 2f; m_Shield = 0f; m_ShieldTime = 0f; m_DmgTime = 0f; }
             if (confirm && shooter != null && shooter.connectionToClient != null) shooter.TargetHitConfirm(shooter.connectionToClient, fireSeq, travel, kill);
@@ -251,7 +252,7 @@ namespace TankGame.NetSpike
             if (ring != null && ring.TryGetComponent(out Renderer rr))
             {
                 var mpb = new MaterialPropertyBlock(); rr.GetPropertyBlock(mpb);
-                Color c = RingColors[(int)(netId % (uint)RingColors.Length)]; c.a = 0.8f;
+                Color c = SpikeMatch.TeamColors[SpikeMatch.TeamOf(netId)]; c.a = 0.8f;
                 mpb.SetColor("_BaseColor", c); rr.SetPropertyBlock(mpb);
             }
         }
@@ -480,7 +481,7 @@ namespace TankGame.NetSpike
             move = tangent + radial * Mathf.Clamp((24f - r) * 0.25f, -1f, 1f);
             // go for the nearest item when there is one; wander briefly when blocked
             if (m_BotPickups == null || m_BotPickups.Length == 0) m_BotPickups = FindObjectsByType<SpikePickup>(FindObjectsSortMode.None);
-            SpikePickup goal = null; float gd = 70f;
+            SpikePickup goal = null; float gd = 30f;
             foreach (SpikePickup pk in m_BotPickups)
             {
                 if (pk == null || !pk.Available) continue;
@@ -488,6 +489,22 @@ namespace TankGame.NetSpike
                 if (d < gd) { gd = d; goal = pk; }
             }
             if (goal != null) { Vector3 to2 = goal.transform.position - p; move = new Vector2(to2.x, to2.z).normalized; }
+            else if (SpikeMatch.I != null)
+            {
+                int myTeam = SpikeMatch.TeamOf(netId);
+                TankGame.Prototype.ControlPoint fp = null; float fd = float.MaxValue;
+                foreach (var cp in SpikeMatch.I.Points)
+                {
+                    if (cp.Model.Owner == myTeam && cp.Model.OwnerHold > 0.6f) continue;     // ours and safe
+                    float d = Vector3.Distance(cp.transform.position, p);
+                    if (d < fd) { fd = d; fp = cp; }
+                }
+                if (fp != null)
+                {
+                    Vector3 to2 = fp.transform.position - p;
+                    move = fd < 3f ? Vector2.zero : new Vector2(to2.x, to2.z).normalized;       // stand in the zone while it fills
+                }
+            }
             if (Time.time >= m_BotCheck)
             {
                 m_BotCheck = Time.time + 1f;

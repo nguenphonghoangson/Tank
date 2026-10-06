@@ -13,7 +13,7 @@ namespace TankGame.NetSpike
         public static int ReconCount, ReconOver05, SnapshotsIn, Underruns, Shots, Hits, Kills, ServerStarved, ServerDropped, ServerTicks, ServerFires, ExpectedHits, ConfirmedOfExpected;
         public static float ReconMax;
         public static readonly int[] PickupsTaken = new int[8];       // by SpikePickup.Kind (server)
-        public static int DashesStarted;
+        public static int DashesStarted, FlagsCaptured;
         public static long BytesIn, BytesOut;
         public static readonly List<float> FireConfirmMs = new List<float>();
         public static readonly List<float> RttMs = new List<float>();
@@ -63,6 +63,8 @@ namespace TankGame.NetSpike
               .Append(",\n \"pickups_taken_repair_shield_speed_damage\": [").Append(PickupsTaken[1]).Append(",").Append(PickupsTaken[2]).Append(",").Append(PickupsTaken[3]).Append(",").Append(PickupsTaken[4]).Append("]")
               .Append(",\n \"weapon_pickups_taken_mg_shotgun_rocket\": [").Append(PickupsTaken[5]).Append(",").Append(PickupsTaken[6]).Append(",").Append(PickupsTaken[7]).Append("]")
               .Append(",\n \"dashes_started\": ").Append(DashesStarted)
+              .Append(",\n \"flags_captured\": ").Append(FlagsCaptured)
+              .Append(",\n \"score_blue_red\": [").Append(SpikeMatch.I != null ? SpikeMatch.I.score0 : -1).Append(",").Append(SpikeMatch.I != null ? SpikeMatch.I.score1 : -1).Append("]")
               .Append(",\n \"server_fires\": ").Append(ServerFires)
               .Append(",\n \"server_ticks\": ").Append(ServerTicks).Append(",\n \"server_starved_ticks\": ").Append(ServerStarved).Append(",\n \"server_dropped_cmds\": ").Append(ServerDropped)
               .Append(",\n \"bytes_in_per_s\": ").Append((BytesIn / secs).ToString("0", c)).Append(",\n \"bytes_out_per_s\": ").Append((BytesOut / secs).ToString("0", c))

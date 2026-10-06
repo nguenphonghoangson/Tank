@@ -22,6 +22,8 @@ namespace TankGame.NetSpike.Editor
 
         static void BuildScene(bool useMap)
         {
+            string target = useMap ? MatchScenePath : ScenePath;
+            if (SceneManager.GetSceneByPath(target).IsValid() || string.IsNullOrEmpty(SceneManager.GetActiveScene().path)) EditorSceneManager.OpenScene(useMap ? ScenePath : MatchScenePath, OpenSceneMode.Single);   // the scene being rebuilt must not be open
             if (!AssetDatabase.IsValidFolder(Root + "/Materials")) AssetDatabase.CreateFolder(Root, "Materials");
             if (!AssetDatabase.IsValidFolder(Root + "/Prefabs")) AssetDatabase.CreateFolder(Root, "Prefabs");
 
@@ -52,7 +54,8 @@ namespace TankGame.NetSpike.Editor
             camGo.transform.rotation = Quaternion.LookRotation(new Vector3(0f, -22f, 13f).normalized);
 
             Vector3[] mapSpawns = null, mapPickups = null;
-            if (useMap) BuildMap(out mapSpawns, out mapPickups, out pickupPrefab);
+            Vector4[] mapBlocks = null;
+            if (useMap) BuildMap(out mapSpawns, out mapPickups, out pickupPrefab, out mapBlocks);
             else
             {
                 // arena: 60 x 60 with walls and a few covers (same scene on server and clients, so the simulation sees the same world)
@@ -69,12 +72,13 @@ namespace TankGame.NetSpike.Editor
             var world = new GameObject("World");
             world.AddComponent<SpikeWorld>();
             var server = world.AddComponent<SpikeServer>();
-            if (useMap) { world.AddComponent<SpikeMapVisuals>(); BuildFx(); }
+            if (useMap) { var mv = world.AddComponent<SpikeMapVisuals>(); mv.blocks = mapBlocks; mv.half = 60f; BuildFx(); }
             if (useMap)
             {
                 server.spawnPoints = mapSpawns;
                 server.pickupPoints = mapPickups;
                 server.pickupPrefab = pickupPrefab;
+                server.matchPrefab = BuildMatchPrefab();
             }
 
             var net = new GameObject("Network");
@@ -88,6 +92,7 @@ namespace TankGame.NetSpike.Editor
             manager.transport = kcp;
             manager.playerPrefab = prefab;
             if (pickupPrefab != null) manager.spawnPrefabs.Add(pickupPrefab);
+            if (useMap) manager.spawnPrefabs.Add(server.matchPrefab);
             manager.autoCreatePlayer = true;
             manager.maxConnections = 8;
             manager.sendRate = 60;
@@ -103,7 +108,7 @@ namespace TankGame.NetSpike.Editor
         }
 
         /// <summary>The Crossfire map as geometry only: gameplay components are removed (flags, item slots and layout are replaced by the spike's own versions).</summary>
-        static void BuildMap(out Vector3[] spawns, out Vector3[] pickups, out GameObject pickupPrefab)
+        static void BuildMap(out Vector3[] spawns, out Vector3[] pickups, out GameObject pickupPrefab, out Vector4[] blocks)
         {
             var src = AssetDatabase.LoadAssetAtPath<GameObject>(MapPrefabPath);
             var map = (GameObject)PrefabUtility.InstantiatePrefab(src);
@@ -122,6 +127,10 @@ namespace TankGame.NetSpike.Editor
             SerializedProperty slots = so.FindProperty("pickups");
             for (int i = 0; i < slots.arraySize; i++) pickupList.Add(((Component)slots.GetArrayElementAtIndex(i).objectReferenceValue).transform.position);
             spawns = spawnList.ToArray(); pickups = pickupList.ToArray();
+            var blockList = new System.Collections.Generic.List<Vector4>();
+            Transform geo = map.transform.Find("Geometry");
+            if (geo != null) foreach (Transform c in geo) if (c.name.StartsWith("Cover_")) blockList.Add(new Vector4(c.position.x, c.position.z, c.lossyScale.x, c.lossyScale.z));
+            blocks = blockList.ToArray();
 
             // the item slot's own models become the networked item prefab; then strip gameplay scripts (flags keep ControlPoint for their visuals only)
             Transform slotsRoot = map.transform.Find("Pickups");
@@ -213,6 +222,16 @@ namespace TankGame.NetSpike.Editor
 
             var prefab = PrefabUtility.SaveAsPrefabAsset(root, Root + "/Prefabs/SpikeTank.prefab");
             Object.DestroyImmediate(root);
+            return prefab;
+        }
+
+        static GameObject BuildMatchPrefab()
+        {
+            var go = new GameObject("SpikeMatch");
+            go.AddComponent<NetworkIdentity>();
+            go.AddComponent<SpikeMatch>();
+            var prefab = PrefabUtility.SaveAsPrefabAsset(go, Root + "/Prefabs/SpikeMatch.prefab");
+            Object.DestroyImmediate(go);
             return prefab;
         }
 

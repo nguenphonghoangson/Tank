@@ -17,7 +17,8 @@ namespace TankGame.NetSpike
         float m_Acc;
 
         [Header("Items")]
-        public GameObject pickupPrefab;
+        public GameObject pickupPrefab, matchPrefab;
+        SpikeMatch m_Match;
         public Vector3[] pickupPoints = new Vector3[0];
         public float pickupRespawnScale = 1f;
         readonly List<SpikePickup> m_Pickups = new List<SpikePickup>();
@@ -65,6 +66,7 @@ namespace TankGame.NetSpike
             if (m_PickupsSpawned) return;
             m_PickupsSpawned = true;
             m_Rng = new System.Random(12345);
+            if (matchPrefab != null) { var mg = Instantiate(matchPrefab); NetworkServer.Spawn(mg); m_Match = mg.GetComponent<SpikeMatch>(); }
             if (pickupPrefab == null) return;
             foreach (Vector3 pos in pickupPoints)
             {
@@ -94,6 +96,7 @@ namespace TankGame.NetSpike
                 }
             }
             foreach (SpikeTank t in m_Tanks) t.ServerResolveFire(Tick);
+            if (m_Match != null) m_Match.ServerTick(SpikeSim.Dt);
 
             for (int i = Pending.Count - 1; i >= 0; i--)
             {
