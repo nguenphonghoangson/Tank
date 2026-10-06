@@ -1,0 +1,4 @@
+Mirror Networking v96.11.3
+Source: https://github.com/MirrorNetworking/Mirror (tag v96.11.3, commit 70969f5e29a1f5c6d63d4cd402329c34a02065f0)
+License: MIT (see LICENSE.txt)
+Copied from Assets/Mirror without Examples and Tests. To update, replace this folder from a newer tag and update this file.
