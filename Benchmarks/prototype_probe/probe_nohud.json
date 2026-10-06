@@ -1,0 +1,12 @@
+{
+ "unity": "6000.6.4f1",
+ "graphics": "Metal",
+ "resolution": "1920x1080",
+ "vsync": 1,
+ "shots": 28,
+ "kills": 3,
+ "idle_gc_bytes_per_frame": {"n":300,"mean":0.32,"p50":0,"p95":0,"max":72,"frames_nonzero":2},
+ "fight_gc_bytes_per_frame": {"n":600,"mean":3.093,"p50":0,"p95":0,"max":1220,"frames_nonzero":16},
+ "idle_frame_ms": {"n":300,"mean":16.835,"p50":16.672,"p95":17.544,"max":67.344,"frames_nonzero":300},
+ "fight_frame_ms": {"n":600,"mean":16.695,"p50":16.669,"p95":17.53,"max":32.883,"frames_nonzero":600}
+}

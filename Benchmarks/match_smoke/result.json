@@ -1,0 +1,9 @@
+{
+  "failure": null,
+  "capture_model": "neutral_capture_1_tank_s=6.02;neutral_capture_2_tanks_s=4.02;contest_frozen=true;contest_events=1;flip_owned_point_s=12.04;passed_through_neutral=true;solo_5_teams_owner=4",
+  "mechanics": {"dash_distance_m":7.189,"dash_cooldown_left_s":5.602,"shots_before_reload":10,"ammo_when_reload_started":0,"reload_seconds":1.599,"ammo_after_reload":10,"hp_before_pickup":40,"hp_after_pickup":80,"pickup_consumed":true},
+  "presets": [{"mode":"TwoTeams3v2","teams":2,"players":5,"solo":false,"tanks_alive":3,"min_tank_distance_m":7.3,"all_in_bounds":true,"share_sum_le_1":true},{"mode":"ThreeTeams221","teams":3,"players":5,"solo":false,"tanks_alive":3,"min_tank_distance_m":9.4,"all_in_bounds":true,"share_sum_le_1":true},{"mode":"Solo5","teams":5,"players":5,"solo":true,"tanks_alive":3,"min_tank_distance_m":11.3,"all_in_bounds":true,"share_sum_le_1":true}],
+  "errors": 0,
+  "error_messages": [],
+  "timescale_restored": true
+}

@@ -1,0 +1,12 @@
+{
+  "winner_team": 1,
+  "draw": false,
+  "end_reason": "Time up",
+  "elapsed_s": 74.999,
+  "first_point_owned_at_s": 9.832,
+  "contested_frames": 3949,
+  "max_current_share": 0.667,
+  "teams": [{"name":"Blue","avg_control":0.108,"final_now":0.000,"score":1065},{"name":"Red","avg_control":0.279,"final_now":0.333,"score":1205}],
+  "avg_control_sum": 0.387,
+  "players": [{"name":"You","team":0,"K":6,"D":5,"A":5,"cap":1,"def":0,"con":0,"score":525},{"name":"Bot 1","team":0,"K":8,"D":8,"A":4,"cap":0,"def":1,"con":0,"score":540},{"name":"Bot 2","team":1,"K":7,"D":6,"A":3,"cap":2,"def":2,"con":0,"score":705},{"name":"Bot 3","team":1,"K":6,"D":8,"A":4,"cap":1,"def":0,"con":0,"score":500}]
+}
