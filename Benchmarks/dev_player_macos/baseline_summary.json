@@ -1,0 +1,120 @@
+{
+ "schema": 1,
+ "description": "median across 3 runs of per-run stats; counters draw_calls/batches read 0 (unreliable); triangles/vertices/setpass use p50",
+ "config": {
+  "schema": 1,
+  "status": "completed",
+  "unity": "6000.6.4f1",
+  "platform": "OSXPlayer",
+  "device": "Mac16,10",
+  "cpu": "Apple M4",
+  "graphics_api": "Metal",
+  "gpu": "Apple M4",
+  "render_pipeline": "Tank_URP_Asset",
+  "quality_level": "Ultra",
+  "vsync_count": 1,
+  "target_frame_rate": -1,
+  "display_refresh_hz": 60.0,
+  "screen_width": 1920,
+  "screen_height": 1080,
+  "full_screen": false,
+  "development_build": true,
+  "frame_timing_enabled": true,
+  "warmup_frames": 300,
+  "measure_frames": 1800,
+  "missing_counters": [
+   "rec_render_thread_ms"
+  ]
+ },
+ "runs": [
+  "benchmark_run1",
+  "benchmark_run2",
+  "benchmark_run3"
+ ],
+ "median_of_runs": {
+  "wall_ms": {
+   "mean": 16.6758,
+   "p50": 16.6653,
+   "p95": 17.4378,
+   "p99": 17.6307,
+   "max": 33.3426
+  },
+  "ft_cpu_ms": {
+   "mean": 16.6757,
+   "p50": 16.6634,
+   "p95": 17.588,
+   "p99": 17.7088,
+   "max": 32.0565
+  },
+  "ft_main_ms": {
+   "mean": 2.1607,
+   "p50": 2.2487,
+   "p95": 2.9389,
+   "p99": 3.694,
+   "max": 5.0215
+  },
+  "ft_render_ms": {
+   "mean": 1.2191,
+   "p50": 1.1685,
+   "p95": 1.7703,
+   "p99": 1.8956,
+   "max": 2.3037
+  },
+  "ft_gpu_ms": {
+   "mean": 0.9139,
+   "p50": 0.9068,
+   "p95": 1.0319,
+   "p99": 1.1886,
+   "max": 2.7136
+  },
+  "gc_alloc_bytes": {
+   "mean": 0.3644,
+   "p50": 0.0,
+   "p95": 0.0,
+   "p99": 0.0,
+   "max": 560.0
+  },
+  "setpass_calls": {
+   "mean": 8.0,
+   "p50": 8.0,
+   "p95": 16.0,
+   "p99": 16.0,
+   "max": 16.0
+  },
+  "triangles": {
+   "mean": 253155.0,
+   "p50": 253155.0,
+   "p95": 506310.0,
+   "p99": 506310.0,
+   "max": 506310.0
+  },
+  "vertices": {
+   "mean": 183313.0,
+   "p50": 183313.0,
+   "p95": 366626.0,
+   "p99": 366626.0,
+   "max": 366626.0
+  },
+  "gc_reserved_mb": {
+   "mean": 1.9844,
+   "p50": 1.9844,
+   "p95": 1.9844,
+   "p99": 1.9844,
+   "max": 1.9844
+  },
+  "gc_used_mb": {
+   "mean": 1.8398,
+   "p50": 1.8398,
+   "p95": 1.8398,
+   "p99": 1.8398,
+   "max": 1.8398
+  },
+  "system_used_mb": {
+   "mean": 450.0146,
+   "p50": 447.2843,
+   "p95": 459.0653,
+   "p99": 470.8622,
+   "max": 470.9715
+  }
+ }
+}

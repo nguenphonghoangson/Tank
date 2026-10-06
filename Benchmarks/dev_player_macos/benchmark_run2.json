@@ -1,0 +1,29 @@
+{
+    "schema": 1,
+    "status": "completed",
+    "tag": "run2",
+    "unity": "6000.6.4f1",
+    "platform": "OSXPlayer",
+    "device": "Mac16,10",
+    "cpu": "Apple M4",
+    "graphics_api": "Metal",
+    "gpu": "Apple M4",
+    "render_pipeline": "Tank_URP_Asset",
+    "quality_level": "Ultra",
+    "vsync_count": 1,
+    "target_frame_rate": -1,
+    "display_refresh_hz": 60.0,
+    "screen_width": 1920,
+    "screen_height": 1080,
+    "full_screen": false,
+    "development_build": true,
+    "frame_timing_enabled": true,
+    "warmup_frames": 300,
+    "measure_frames": 1800,
+    "warmup_seconds": 5.1266335000000005,
+    "measure_seconds": 30.008639666,
+    "missing_counters": [
+        "rec_render_thread_ms"
+    ],
+    "csv": "/Users/nguenphonghoangson/Documents/Tank/Benchmarks/dev_player_macos/benchmark_run2.csv"
+}
