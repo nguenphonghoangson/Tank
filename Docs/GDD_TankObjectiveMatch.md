@@ -1,6 +1,6 @@
 # GDD: Tank Objective Match (prototype v0.3)
 
-Trạng thái: **bản prototype đã chơi được, chưa qua playtest của người thật.** Mọi con số dưới đây là điểm khởi đầu lấy từ code (`Assets/Prototype/`), chưa được cân bằng. Tài liệu nội bộ, không chia sẻ ra ngoài.
+Trạng thái: **prototype chơi được. Playtest nội bộ lần 1 (team, bản macOS): đánh giá ổn, chưa có yêu cầu chỉnh.** Phản hồi mới ở mức tổng quan, chưa có điểm số theo từng câu hỏi hay số liệu chi tiết. Các con số dưới đây vẫn lấy từ code (`Assets/Prototype/`) và chưa được cân bằng bằng dữ liệu. Tài liệu nội bộ, không chia sẻ ra ngoài.
 
 ## 1. Tóm tắt
 PvP tank shooter theo **mục tiêu**, tối đa **5 người** mỗi trận (solo, 2 đội hoặc 3 đội). Người chơi lái tank, bắn nhau, **giữ cờ** để kiếm điểm, và mỗi phase chọn một **lõi (core)** ngẫu nhiên để build tank. Sau 4 phase, bên có tổng điểm cao nhất thắng.
