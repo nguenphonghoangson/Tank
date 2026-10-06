@@ -1,0 +1,19 @@
+{
+    "name": "TankGame.NetSpike",
+    "rootNamespace": "TankGame.NetSpike",
+    "references": [
+        "Mirror",
+        "Mirror.Transports",
+        "kcp2k",
+        "Unity.InputSystem"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}
