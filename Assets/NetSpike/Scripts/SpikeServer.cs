@@ -10,7 +10,7 @@ namespace TankGame.NetSpike
         public static SpikeServer I { get; private set; }
         public uint Tick { get; private set; }
 
-        public struct PendingHit { public SpikeTank target, shooter; public uint applyTick; public uint fireSeq; public float travel; public int dmg; }
+        public struct PendingHit { public SpikeTank target, shooter; public uint applyTick; public uint fireSeq; public float travel; public int dmg; public bool confirm; public Vector3 impact; public float splashR; public int splashDmg; }
 
         readonly List<SpikeTank> m_Tanks = new List<SpikeTank>();
         public readonly List<PendingHit> Pending = new List<PendingHit>();
@@ -100,7 +100,14 @@ namespace TankGame.NetSpike
                 PendingHit h = Pending[i];
                 if (Tick < h.applyTick) continue;
                 Pending.RemoveAt(i);
-                if (h.target != null && !h.target.ServerDead) h.target.ServerDamage(h.shooter, h.dmg, h.fireSeq, h.travel);
+                if (h.target != null && !h.target.ServerDead) h.target.ServerDamage(h.shooter, h.dmg, h.fireSeq, h.travel, h.confirm);
+                if (h.splashR > 0f)
+                    foreach (SpikeTank o in m_Tanks)
+                    {
+                        if (o == h.shooter || o == h.target || o.ServerDead) continue;
+                        Vector3 d = o.ServerState.pos - h.impact; d.y = 0f;
+                        if (d.magnitude <= h.splashR) o.ServerDamage(h.shooter, h.splashDmg, h.fireSeq, h.travel, false);
+                    }
             }
             foreach (SpikeTank t in m_Tanks) t.ServerSendSnapshot(Tick);
         }

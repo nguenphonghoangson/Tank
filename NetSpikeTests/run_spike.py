@@ -77,7 +77,7 @@ def main():
                 c["bytes_in_per_s"], c["bytes_out_per_s"]))
         print("   server: ticks %d, shots accepted %d (clients predicted %d), starved %d, dropped %d, out %s B/s, in %s B/s" % (s["server_ticks"], s["server_fires"], c1["shots"] + c2["shots"], s["server_starved_ticks"], s["server_dropped_cmds"], s["bytes_out_per_s"], s["bytes_in_per_s"]))
         if "pickups_taken_repair_shield_speed_damage" in s:
-            print("   items taken (repair/shield/speed/damage) %s, dashes started %s, client corrections/min %s / %s" % (s["pickups_taken_repair_shield_speed_damage"], s["dashes_started"], c1["corrections_per_min"], c2["corrections_per_min"]))
+            print("   items taken (repair/shield/speed/damage) %s, dashes started %s, weapons (mg/shotgun/rocket) %s, client corrections/min %s / %s" % (s["pickups_taken_repair_shield_speed_damage"], s["dashes_started"], s.get("weapon_pickups_taken_mg_shotgun_rocket"), c1["corrections_per_min"], c2["corrections_per_min"]))
 
 
 if __name__ == "__main__":

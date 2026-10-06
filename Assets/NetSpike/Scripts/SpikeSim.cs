@@ -16,6 +16,32 @@ namespace TankGame.NetSpike
         public const float DashSpeed = 36f, DashDuration = 0.22f, DashCooldown = 4f;
         public const float SpeedMult = 1.4f, SpeedSeconds = 8f, DamageMult = 1.5f, DamageSeconds = 10f, ShieldSeconds = 12f;
         public const int HealAmount = 40, ShieldAmount = 50;
+        public struct WeaponSpec
+        {
+            public string name; public int damage; public float interval, speed, range; public int pellets; public float spread; public int ammo; public float splashRadius, splashFactor;
+        }
+        // same numbers as the prototype WeaponDef assets (the cannon has no splash here, to keep the earlier measurements comparable)
+        public static readonly WeaponSpec[] Weapons =
+        {
+            new WeaponSpec { name = "CANNON", damage = 25, interval = 0.33f, speed = 55f, range = 70f, pellets = 1, spread = 0f, ammo = 0 },
+            new WeaponSpec { name = "MG", damage = 8, interval = 0.085f, speed = 70f, range = 48f, pellets = 1, spread = 3.5f, ammo = 45 },
+            new WeaponSpec { name = "SHOTGUN", damage = 9, interval = 0.75f, speed = 44f, range = 26f, pellets = 7, spread = 18f, ammo = 7 },
+            new WeaponSpec { name = "ROCKET", damage = 55, interval = 1.0f, speed = 32f, range = 70f, pellets = 1, spread = 0f, ammo = 4, splashRadius = 5.5f, splashFactor = 0.6f },
+        };
+        public static int LastFiredWeapon;      // weapon of the shot the last Step produced (read right after Step)
+
+        /// <summary>Deterministic pellet direction: the same on the shooter's screen and on the server.</summary>
+        public static Vector3 PelletDir(TankState s, int weapon, uint seq, int i)
+        {
+            WeaponSpec w = Weapons[weapon];
+            uint h = seq * 2654435761u + (uint)(i + 1) * 40503u; h ^= h >> 13; h *= 1274126177u; h ^= h >> 16;
+            float rnd = (h & 0xFFFF) / 65535f;
+            float off = 0f;
+            if (w.pellets > 1) off = ((float)i / (w.pellets - 1) - 0.5f) * w.spread + (rnd - 0.5f) * 2f;
+            else if (w.spread > 0f) off = (rnd - 0.5f) * w.spread;
+            return Quaternion.Euler(0f, s.turretYaw + off, 0f) * Vector3.forward;
+        }
+
         public const float BoxHalfX = 1.05f, BoxHalfZ = 1.65f;
 
         public static InputCmd MakeCmd(uint seq, Vector2 move, float aimYawDeg, bool fire, uint viewTick, bool dash = false)
@@ -90,7 +116,13 @@ namespace TankGame.NetSpike
             s.turretYaw = Mathf.MoveTowardsAngle(s.turretYaw, AimYaw(c), TurretTurn * Dt);
 
             s.fireCd = Mathf.Max(0f, s.fireCd - Dt);
-            if (Fire(c) && s.fireCd <= 0f) { s.fireCd = FireInterval; return true; }
+            if (Fire(c) && s.fireCd <= 0f)
+            {
+                LastFiredWeapon = s.weapon;
+                s.fireCd = Weapons[s.weapon].interval;
+                if (s.weapon != 0 && --s.ammo <= 0) { s.weapon = 0; s.ammo = 0; }
+                return true;
+            }
             return false;
         }
 
@@ -103,12 +135,14 @@ namespace TankGame.NetSpike
         public static Vector3 TurretDir(TankState s) { return Quaternion.Euler(0f, s.turretYaw, 0f) * Vector3.forward; }
 
         /// <summary>Horizontal ray against the tank's footprint (an oriented rectangle). Returns the entry distance.</summary>
-        public static bool RayHitsTank(Vector3 origin, Vector3 dir, TankState t, out float dist)
+        public static bool RayHitsTank(Vector3 origin, Vector3 dir, TankState t, out float dist) { return RayHitsTank(origin, dir, t, Range, out dist); }
+
+        public static bool RayHitsTank(Vector3 origin, Vector3 dir, TankState t, float maxDist, out float dist)
         {
             dist = 0f;
             Quaternion inv = Quaternion.Euler(0f, -t.yaw, 0f);
             Vector3 o = inv * (origin - t.pos), d = inv * dir;
-            float tMin = 0f, tMax = Range;
+            float tMin = 0f, tMax = maxDist;
             float[] oo = { o.x, o.z }, dd = { d.x, d.z }, half = { BoxHalfX, BoxHalfZ };
             for (int i = 0; i < 2; i++)
             {

@@ -12,7 +12,7 @@ namespace TankGame.NetSpike
     {
         public static int ReconCount, ReconOver05, SnapshotsIn, Underruns, Shots, Hits, Kills, ServerStarved, ServerDropped, ServerTicks, ServerFires, ExpectedHits, ConfirmedOfExpected;
         public static float ReconMax;
-        public static readonly int[] PickupsTaken = new int[5];       // by SpikePickup.Kind (server)
+        public static readonly int[] PickupsTaken = new int[8];       // by SpikePickup.Kind (server)
         public static int DashesStarted;
         public static long BytesIn, BytesOut;
         public static readonly List<float> FireConfirmMs = new List<float>();
@@ -61,6 +61,7 @@ namespace TankGame.NetSpike
               .Append(",\n \"dbg\": {\"client_ticks\":").Append(DbgTicks).Append(",\"moving\":").Append(DbgMoving).Append(",\"bot_on\":").Append(DbgBotOn).Append(",\"target_seen\":").Append(DbgTargetSeen).Append(",\"fire_wanted\":").Append(DbgFireWanted).Append(",\"pushes\":").Append(DbgPush).Append(",\"overlaps\":").Append(DbgOverlaps).Append(",\"stops\":").Append(DbgStop).Append(",\"overlap_names\":\"").Append(DbgNames).Append("\",\"last_pos\":\"").Append(DbgPos.ToString("0.0")).Append("\"").Append(",\"min_dist\":").Append(DbgMinDist.ToString("0.#", c)).Append(",\"min_angle\":").Append(DbgMinAngle.ToString("0.#", c)).Append(",\"last_dist\":").Append(DbgLastDist.ToString("0.#", c)).Append(",\"last_angle\":").Append(DbgLastAngle.ToString("0.#", c)).Append("}")
               .Append(",\n \"expected_hits_seen_on_screen\": ").Append(ExpectedHits).Append(",\n \"expected_hits_confirmed_by_server\": ").Append(ConfirmedOfExpected)
               .Append(",\n \"pickups_taken_repair_shield_speed_damage\": [").Append(PickupsTaken[1]).Append(",").Append(PickupsTaken[2]).Append(",").Append(PickupsTaken[3]).Append(",").Append(PickupsTaken[4]).Append("]")
+              .Append(",\n \"weapon_pickups_taken_mg_shotgun_rocket\": [").Append(PickupsTaken[5]).Append(",").Append(PickupsTaken[6]).Append(",").Append(PickupsTaken[7]).Append("]")
               .Append(",\n \"dashes_started\": ").Append(DashesStarted)
               .Append(",\n \"server_fires\": ").Append(ServerFires)
               .Append(",\n \"server_ticks\": ").Append(ServerTicks).Append(",\n \"server_starved_ticks\": ").Append(ServerStarved).Append(",\n \"server_dropped_cmds\": ").Append(ServerDropped)

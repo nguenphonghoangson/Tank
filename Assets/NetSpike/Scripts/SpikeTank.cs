@@ -16,7 +16,7 @@ namespace TankGame.NetSpike
         public static readonly List<SpikeTank> All = new List<SpikeTank>();
         public static float RemoteViewTick;           // server tick the remote tanks are being drawn at (sent with every shot)
         public static uint LatestServerTick;
-        public static int HudHp, HudShield; public static bool HudDmg; public static float HudSpeedTime, HudDashCd;   // local tank, for the screen
+        public static int HudHp, HudShield; public static bool HudDmg; public static float HudSpeedTime, HudDashCd; public static int HudWeapon, HudAmmo;   // local tank, for the screen
         public static int JitterTicks;                // server: wait for this many queued commands before consuming (0 = off)
 
         [Header("Visual")]
@@ -37,6 +37,7 @@ namespace TankGame.NetSpike
         readonly Queue<InputCmd> m_Queue = new Queue<InputCmd>();
         InputCmd m_Last, m_FireCmd;
         bool m_HasLast, m_WantFire, m_Primed;
+        int m_FireWeapon;
         float m_RespawnAt;
         readonly TankState[] m_SHist = new TankState[64];
         readonly uint[] m_SHistTick = new uint[64];
@@ -83,7 +84,7 @@ namespace TankGame.NetSpike
             if (m_DmgTime > 0f) m_DmgTime -= SpikeSim.Dt;
             if (real) m_Ack = c.seq;
             m_WantFire = real && fired;
-            if (m_WantFire) m_FireCmd = c;
+            if (m_WantFire) { m_FireCmd = c; m_FireWeapon = SpikeSim.LastFiredWeapon; }
             Record(tick);
         }
 
@@ -98,26 +99,36 @@ namespace TankGame.NetSpike
             m_WantFire = false;
             SpikeMetrics.ServerFires++;
             TankState s = ServerState;
-            Vector3 origin = SpikeSim.MuzzleOrigin(s), dir = SpikeSim.TurretDir(s);
-            float best = SpikeWorld.RayDistance(origin, dir, SpikeSim.Range);
-            SpikeTank target = null;
+            SpikeSim.WeaponSpec w = SpikeSim.Weapons[m_FireWeapon];
+            Vector3 origin = SpikeSim.MuzzleOrigin(s);
             uint view = m_FireCmd.viewTick;
             if (view > tick || tick - view > 20) view = tick;                 // never rewind more than ~0.66 s
-            foreach (SpikeTank o in SpikeServer.I.Tanks)
+            float mult = m_DmgTime > 0f ? SpikeSim.DamageMult : 1f;
+            var dirs = new Vector3[w.pellets]; var dists = new float[w.pellets];
+            bool confirmSent = false;
+            for (int i = 0; i < w.pellets; i++)
             {
-                if (o == this || o.ServerDead) continue;
-                if (SpikeSim.RayHitsTank(origin, dir, o.StateAt(view), out float d) && d < best) { best = d; target = o; }
-            }
-            RpcShot(origin, dir, best);
-            if (target != null)
-            {
-                float travel = best / SpikeSim.ShellSpeed;
+                Vector3 dir = SpikeSim.PelletDir(s, m_FireWeapon, m_FireCmd.seq, i);
+                float best = SpikeWorld.RayDistance(origin, dir, w.range);
+                SpikeTank target = null;
+                foreach (SpikeTank o in SpikeServer.I.Tanks)
+                {
+                    if (o == this || o.ServerDead) continue;
+                    if (SpikeSim.RayHitsTank(origin, dir, o.StateAt(view), w.range, out float d) && d < best) { best = d; target = o; }
+                }
+                dirs[i] = dir; dists[i] = best;
+                bool wall = target == null && best < w.range - 0.01f;
+                if (target == null && !(w.splashRadius > 0f && wall)) continue;
+                float travel = best / w.speed;
                 SpikeServer.I.Pending.Add(new SpikeServer.PendingHit
                 {
-                    target = target, shooter = this, fireSeq = m_FireCmd.seq, travel = travel, dmg = Mathf.RoundToInt(SpikeSim.Damage * (m_DmgTime > 0f ? SpikeSim.DamageMult : 1f)),
+                    target = target, shooter = this, fireSeq = m_FireCmd.seq, travel = travel, dmg = Mathf.RoundToInt(w.damage * mult), confirm = target != null && !confirmSent,
+                    impact = origin + dir * best, splashR = w.splashRadius, splashDmg = Mathf.RoundToInt(w.damage * w.splashFactor * mult),
                     applyTick = tick + (uint)Mathf.CeilToInt(travel / SpikeSim.Dt),
                 });
+                if (target != null) confirmSent = true;
             }
+            RpcShot(origin, dirs, dists, (byte)m_FireWeapon);
         }
 
         /// <summary>Applies an item to this tank. Returns false when it would be wasted (a repair kit at full health), so the item stays.</summary>
@@ -130,11 +141,22 @@ namespace TankGame.NetSpike
                 case SpikePickup.Kind.Shield: m_Shield = SpikeSim.ShieldAmount; m_ShieldTime = SpikeSim.ShieldSeconds; return true;
                 case SpikePickup.Kind.Speed: ServerState.speedTime = SpikeSim.SpeedSeconds; return true;
                 case SpikePickup.Kind.Damage: m_DmgTime = SpikeSim.DamageSeconds; return true;
+                case SpikePickup.Kind.MachineGun: return GrantWeapon(1);
+                case SpikePickup.Kind.Shotgun: return GrantWeapon(2);
+                case SpikePickup.Kind.Rocket: return GrantWeapon(3);
             }
             return false;
         }
 
-        public void ServerDamage(SpikeTank shooter, int dmg, uint fireSeq, float travel)
+        bool GrantWeapon(int idx)
+        {
+            if (ServerState.weapon == idx) return false;
+            ServerState.weapon = (byte)idx; ServerState.ammo = (byte)SpikeSim.Weapons[idx].ammo;
+            ServerState.fireCd = Mathf.Min(ServerState.fireCd, 0.15f);
+            return true;
+        }
+
+        public void ServerDamage(SpikeTank shooter, int dmg, uint fireSeq, float travel, bool confirm)
         {
             if (m_Shield > 0f)
             {
@@ -146,7 +168,7 @@ namespace TankGame.NetSpike
             m_Hp = (byte)hp;
             bool kill = hp == 0;
             if (kill) { ServerDead = true; m_RespawnAt = Time.time + 2f; m_Shield = 0f; m_ShieldTime = 0f; m_DmgTime = 0f; }
-            if (shooter != null && shooter.connectionToClient != null) shooter.TargetHitConfirm(shooter.connectionToClient, fireSeq, travel, kill);
+            if (confirm && shooter != null && shooter.connectionToClient != null) shooter.TargetHitConfirm(shooter.connectionToClient, fireSeq, travel, kill);
         }
 
         void ServerRespawn()
@@ -163,7 +185,7 @@ namespace TankGame.NetSpike
             RpcSnapshot(new Snap
             {
                 serverTick = tick, ackSeq = m_Ack, x = ServerState.pos.x, z = ServerState.pos.z, speed = ServerState.speed, fireCd = ServerState.fireCd,
-                dashTime = ServerState.dashTime, dashCd = ServerState.dashCd, dashYaw = ServerState.dashYaw, speedTime = ServerState.speedTime,
+                dashTime = ServerState.dashTime, dashCd = ServerState.dashCd, dashYaw = ServerState.dashYaw, speedTime = ServerState.speedTime, weapon = ServerState.weapon, ammo = ServerState.ammo,
                 yaw = (ushort)Mathf.Clamp(Mathf.RoundToInt(Mathf.Repeat(ServerState.yaw, 360f) / 360f * 65536f), 0, 65535),
                 turret = (ushort)Mathf.Clamp(Mathf.RoundToInt(Mathf.Repeat(ServerState.turretYaw, 360f) / 360f * 65536f), 0, 65535),
                 hp = m_Hp, shield = (byte)Mathf.CeilToInt(m_Shield), flags = (byte)((ServerDead ? 1 : 0) | (m_DmgTime > 0f ? 2 : 0)), epoch = m_Epoch,
@@ -176,13 +198,13 @@ namespace TankGame.NetSpike
             SpikeMetrics.SnapshotsIn++;
             if (s.serverTick > LatestServerTick) LatestServerTick = s.serverTick;
             m_ClientDead = (s.flags & 1) != 0;
-            if (hpText != null) hpText.text = m_ClientDead ? "DEAD" : s.hp + (s.shield > 0 ? " +" + s.shield : "") + ((s.flags & 2) != 0 ? " x1.5" : "");
-            if (isLocalPlayer) { HudHp = s.hp; HudShield = s.shield; HudDmg = (s.flags & 2) != 0; HudSpeedTime = s.speedTime; HudDashCd = s.dashCd; }
+            if (hpText != null) hpText.text = m_ClientDead ? "DEAD" : s.hp + (s.shield > 0 ? " +" + s.shield : "") + ((s.flags & 2) != 0 ? " x1.5" : "") + (s.weapon != 0 ? "\n" + SpikeSim.Weapons[s.weapon].name + " " + s.ammo : "");
+            if (isLocalPlayer) { HudHp = s.hp; HudShield = s.shield; HudDmg = (s.flags & 2) != 0; HudSpeedTime = s.speedTime; HudDashCd = s.dashCd; HudWeapon = s.weapon; HudAmmo = s.ammo; }
             if (isLocalPlayer) Reconcile(s); else AddRemote(s);
         }
 
         [ClientRpc(includeOwner = false, channel = Channels.Reliable)]
-        void RpcShot(Vector3 origin, Vector3 dir, float dist) { SpawnShell(origin, dir, dist); }
+        void RpcShot(Vector3 origin, Vector3[] dirs, float[] dists, byte weapon) { for (int i = 0; i < dirs.Length; i++) SpawnShell(origin, dirs[i], dists[i], weapon); }
 
         [TargetRpc]
         void TargetHitConfirm(NetworkConnectionToClient target, uint fireSeq, float travel, bool kill)
@@ -271,13 +293,20 @@ namespace TankGame.NetSpike
             {
                 SpikeMetrics.Shots++;
                 m_FireTime[m_Seq % 256] = Time.realtimeSinceStartupAsDouble;
-                Vector3 o = SpikeSim.MuzzleOrigin(m_Pred), d = SpikeSim.TurretDir(m_Pred);
-                float wall = SpikeWorld.RayDistance(o, d, SpikeSim.Range);
-                SpawnShell(o, d, wall);
-                // would this shot hit what is drawn on this screen (target alive, not behind cover)? The server should agree.
+                int fw = SpikeSim.LastFiredWeapon;
+                SpikeSim.WeaponSpec w = SpikeSim.Weapons[fw];
+                Vector3 o = SpikeSim.MuzzleOrigin(m_Pred);
                 bool expected = false;
-                foreach (SpikeTank other in All)
-                    if (other != this && !other.ClientDead && other.RenderPos != Vector3.zero && SpikeSim.RayHitsTank(o, d, other.RenderState, out float hd) && hd < wall) { expected = true; break; }
+                for (int i = 0; i < w.pellets; i++)
+                {
+                    Vector3 d = SpikeSim.PelletDir(m_Pred, fw, m_Seq, i);
+                    float wall = SpikeWorld.RayDistance(o, d, w.range);
+                    SpawnShell(o, d, wall, (byte)fw);
+                    // would this shot hit what is drawn on this screen (target alive, not behind cover)? The server should agree.
+                    if (!expected)
+                        foreach (SpikeTank other in All)
+                            if (other != this && !other.ClientDead && other.RenderPos != Vector3.zero && SpikeSim.RayHitsTank(o, d, other.RenderState, w.range, out float hd) && hd < wall) { expected = true; break; }
+                }
                 m_ExpectedHit[m_Seq % 256] = expected;
                 if (expected) SpikeMetrics.ExpectedHits++;
             }
@@ -304,7 +333,7 @@ namespace TankGame.NetSpike
             if (!e.valid || e.cmd.seq != s.ackSeq) { m_Pred = server; return; }
             float err = Vector3.Distance(e.after.pos, server.pos);
             float yawErr = Mathf.Abs(Mathf.DeltaAngle(e.after.yaw, server.yaw));
-            bool skillErr = Mathf.Abs(e.after.speedTime - server.speedTime) > 0.2f || Mathf.Abs(e.after.dashCd - server.dashCd) > 0.2f;
+            bool skillErr = Mathf.Abs(e.after.speedTime - server.speedTime) > 0.2f || Mathf.Abs(e.after.dashCd - server.dashCd) > 0.2f || e.after.weapon != server.weapon;
             if (err <= 0.05f && yawErr <= 2f && !skillErr) return;
 
             Vector3 visBefore = m_Pred.pos + m_VisOff;
@@ -326,7 +355,7 @@ namespace TankGame.NetSpike
 
         static TankState FromSnap(Snap s)
         {
-            return new TankState { pos = new Vector3(s.x, 0f, s.z), yaw = s.yaw * (360f / 65536f), turretYaw = s.turret * (360f / 65536f), speed = s.speed, fireCd = s.fireCd, dashTime = s.dashTime, dashCd = s.dashCd, dashYaw = s.dashYaw, speedTime = s.speedTime };
+            return new TankState { pos = new Vector3(s.x, 0f, s.z), yaw = s.yaw * (360f / 65536f), turretYaw = s.turret * (360f / 65536f), speed = s.speed, fireCd = s.fireCd, dashTime = s.dashTime, dashCd = s.dashCd, dashYaw = s.dashYaw, speedTime = s.speedTime, weapon = s.weapon, ammo = s.ammo };
         }
 
         void AddRemote(Snap s)
@@ -467,7 +496,7 @@ namespace TankGame.NetSpike
         }
 
         // ------------------------------------------------------------------ cosmetics
-        void SpawnShell(Vector3 origin, Vector3 dir, float dist)
+        void SpawnShell(Vector3 origin, Vector3 dir, float dist, byte weapon)
         {
             if (Application.isBatchMode) return;                 // headless test clients draw nothing
             var go = GameObject.CreatePrimitive(PrimitiveType.Sphere);
@@ -476,7 +505,8 @@ namespace TankGame.NetSpike
             go.transform.localScale = new Vector3(0.25f, 0.25f, 0.9f);
             if (shellMaterial != null) go.GetComponent<MeshRenderer>().sharedMaterial = shellMaterial;
             var sh = go.AddComponent<SpikeShell>();
-            sh.dir = dir; sh.remaining = dist;
+            sh.dir = dir; sh.remaining = dist; sh.speed = SpikeSim.Weapons[weapon].speed;
+            if (weapon == 3) go.transform.localScale = new Vector3(0.6f, 0.6f, 1.6f); else if (weapon == 2) go.transform.localScale = new Vector3(0.18f, 0.18f, 0.4f);
             if (flash != null) { flash.SetActive(true); CancelInvoke(nameof(HideFlash)); Invoke(nameof(HideFlash), 0.05f); }
         }
 
@@ -486,10 +516,10 @@ namespace TankGame.NetSpike
     public sealed class SpikeShell : MonoBehaviour
     {
         public Vector3 dir;
-        public float remaining;
+        public float remaining, speed = SpikeSim.ShellSpeed;
         void Update()
         {
-            float step = SpikeSim.ShellSpeed * Time.deltaTime;
+            float step = speed * Time.deltaTime;
             transform.position += dir * Mathf.Min(step, remaining);
             remaining -= step;
             if (remaining <= 0f) Destroy(gameObject);

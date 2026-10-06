@@ -10,6 +10,7 @@ namespace TankGame.NetSpike
         public float fireCd;     // seconds until the next shot is allowed (part of the shared simulation)
         public float dashTime, dashCd, dashYaw;   // dash skill: time left in the dash, cooldown left, heading of the dash
         public float speedTime;                   // speed item: seconds left (the multiplier is a constant)
+        public byte weapon, ammo;                 // 0 = cannon (unlimited), otherwise a special weapon with ammo left
     }
 
     /// <summary>One tick of player intent, quantised so both sides apply identical numbers.</summary>
@@ -29,7 +30,7 @@ namespace TankGame.NetSpike
         public uint ackSeq;       // last input the server applied for this tank
         public float x, z, speed, fireCd, dashTime, dashCd, dashYaw, speedTime;
         public ushort yaw, turret;
-        public byte hp, shield;
+        public byte hp, shield, weapon, ammo;
         public byte flags;        // bit 0 = dead, bit 1 = damage buff active
         public byte epoch;        // changes when the tank respawns: the client resets its prediction
     }

@@ -56,3 +56,7 @@ Crossfire (120 x 120, 20 spawn points, 14 item slots) imported as geometry; flag
 | RTT ~204 ms, 2% loss | 7 / 5 / 4 / 1 | 17 | 15, 11 | 26/32, 24/32 |
 
 Server bandwidth rose to ~7.5 KB/s out (snapshot carries dash/speed/shield fields). Weapons pickups, cores, flags and scoring are not in the spike yet.
+
+### Weapons (MG, Shotgun, Rocket)
+
+Weapon and ammo are part of the predicted tank state; pellet directions are a deterministic function of the input sequence number, so the shooter's screen and the server agree on spread. Server resolves each pellet with lag compensation, rocket splash is applied at impact time against current positions (not lag compensated). The cannon stays unlimited with no splash (no reload yet). 60 s, 2 bots: server accepted exactly the shots clients predicted at LAN and 204 ms (259/259, 270/270), 290 vs 296 at 152 ms; corrections 4–14 /min. The rocket was never picked up in these runs (rarest item), so rocket splash is untested. MG fires every 3 ticks (10/s) instead of 11.8/s because of the 30 Hz tick.

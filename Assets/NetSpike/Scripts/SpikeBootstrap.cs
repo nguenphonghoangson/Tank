@@ -107,7 +107,7 @@ namespace TankGame.NetSpike
             GUI.Label(new Rect(10f, Screen.height - 28f, 900f, 24f), line);
             if (me != null && NetworkClient.active)
             {
-                string buffs = "HP " + SpikeTank.HudHp + (SpikeTank.HudShield > 0 ? "  shield " + SpikeTank.HudShield : "") + (SpikeTank.HudDmg ? "  damage x1.5" : "") + (SpikeTank.HudSpeedTime > 0f ? "  speed " + SpikeTank.HudSpeedTime.ToString("0.0") + "s" : "");
+                string buffs = "HP " + SpikeTank.HudHp + (SpikeTank.HudShield > 0 ? "  shield " + SpikeTank.HudShield : "") + (SpikeTank.HudDmg ? "  damage x1.5" : "") + (SpikeTank.HudWeapon != 0 ? "  " + SpikeSim.Weapons[SpikeTank.HudWeapon].name + " " + SpikeTank.HudAmmo : "") + (SpikeTank.HudSpeedTime > 0f ? "  speed " + SpikeTank.HudSpeedTime.ToString("0.0") + "s" : "");
                 GUI.Label(new Rect(10f, 10f, 700f, 24f), buffs);
                 Rect b = SpikeTank.DashButton;
                 var r = new Rect(b.x, Screen.height - b.yMax, b.width, b.height);
