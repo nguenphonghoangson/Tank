@@ -334,6 +334,7 @@ namespace TankGame.NetSpike
             move = Vector2.zero; aimYaw = m_Pred.turretYaw; fire = false;
             if (botMode) { BotInput(ref move, ref aimYaw, ref fire); return; }
             Keyboard kb = Keyboard.current; Mouse mouse = Mouse.current; Camera cam = Camera.main;
+            if (Touchscreen.current != null && (kb == null || mouse == null)) { TouchInput(ref move, ref aimYaw, ref fire); return; }
             if (kb == null || mouse == null || cam == null) return;
             move = new Vector2((kb.dKey.isPressed ? 1f : 0f) - (kb.aKey.isPressed ? 1f : 0f), (kb.wKey.isPressed ? 1f : 0f) - (kb.sKey.isPressed ? 1f : 0f));
             Ray ray = cam.ScreenPointToRay(mouse.position.ReadValue());
@@ -343,6 +344,33 @@ namespace TankGame.NetSpike
                 aimYaw = Mathf.Atan2(p.x, p.z) * Mathf.Rad2Deg;
             }
             fire = mouse.leftButton.isPressed;
+        }
+
+        // Spike-grade touch controls: left half = floating move stick, right half = floating aim stick (fires while held).
+        int m_MoveId = -1, m_AimId = -1;
+        Vector2 m_MoveOrigin, m_AimOrigin;
+        void TouchInput(ref Vector2 move, ref float aimYaw, ref bool fire)
+        {
+            float radius = Mathf.Max(60f, Screen.dpi > 0f ? Screen.dpi * 0.38f : 120f);
+            bool moveSeen = false, aimSeen = false;
+            foreach (var t in Touchscreen.current.touches)
+            {
+                if (!t.press.isPressed) continue;
+                int id = t.touchId.ReadValue(); Vector2 pos = t.position.ReadValue();
+                if (id == m_MoveId) { moveSeen = true; move = Vector2.ClampMagnitude((pos - m_MoveOrigin) / radius, 1f); continue; }
+                if (id == m_AimId) { aimSeen = true; AimFrom(pos - m_AimOrigin, radius, ref aimYaw, ref fire); continue; }
+                if (t.phase.ReadValue() != UnityEngine.InputSystem.TouchPhase.Began) continue;
+                if (pos.x < Screen.width * 0.5f && m_MoveId < 0) { m_MoveId = id; m_MoveOrigin = pos; moveSeen = true; }
+                else if (pos.x >= Screen.width * 0.5f && m_AimId < 0) { m_AimId = id; m_AimOrigin = pos; aimSeen = true; }
+            }
+            if (!moveSeen) m_MoveId = -1;
+            if (!aimSeen) m_AimId = -1;
+        }
+
+        void AimFrom(Vector2 d, float radius, ref float aimYaw, ref bool fire)
+        {
+            if (d.magnitude > radius * 0.25f) aimYaw = Mathf.Atan2(d.x, d.y) * Mathf.Rad2Deg;
+            fire = true;
         }
 
         void BotInput(ref Vector2 move, ref float aimYaw, ref bool fire)

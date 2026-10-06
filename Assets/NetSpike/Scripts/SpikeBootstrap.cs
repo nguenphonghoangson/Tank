@@ -61,6 +61,16 @@ namespace TankGame.NetSpike
             else if (Has("-spikeHost")) { m_Role = "host"; manager.StartHost(); }
             else if (Arg("-spikeClient") != null) { m_Role = "client"; manager.networkAddress = Arg("-spikeClient"); manager.StartClient(); }
             m_Start = Time.realtimeSinceStartup;
+            if (m_Role == null && !Application.isBatchMode) m_Address = PlayerPrefs.GetString("spike.addr", "192.168.1.2");
+        }
+
+        string m_Address = "";
+        void StartFromMenu(bool host)
+        {
+            PlayerPrefs.SetString("spike.addr", m_Address);
+            m_Start = Time.realtimeSinceStartup;
+            if (host) { m_Role = "host"; manager.StartHost(); }
+            else { m_Role = "client"; manager.networkAddress = m_Address.Trim(); manager.StartClient(); }
         }
 
         void Update()
@@ -81,6 +91,16 @@ namespace TankGame.NetSpike
         void OnGUI()
         {
             if (Application.isBatchMode) return;
+            if (m_Role == null)
+            {
+                float k = Mathf.Max(1f, Screen.height / 540f);
+                GUI.matrix = Matrix4x4.Scale(new Vector3(k, k, 1f));
+                GUI.Label(new Rect(20, 20, 400, 24), "Server address (Mac IP on the same Wi-Fi):");
+                m_Address = GUI.TextField(new Rect(20, 48, 260, 32), m_Address);
+                if (GUI.Button(new Rect(20, 90, 125, 40), "Connect")) StartFromMenu(false);
+                if (GUI.Button(new Rect(155, 90, 125, 40), "Host")) StartFromMenu(true);
+                return;
+            }
             SpikeTank me = SpikeTank.Local;
             string line = "rtt " + (NetworkClient.active ? Mathf.RoundToInt((float)(NetworkTime.rtt * 1000.0)).ToString() : "-") + " ms   corrections " + SpikeMetrics.ReconCount +
                           "   >0.5 m: " + SpikeMetrics.ReconOver05 + "   shots " + SpikeMetrics.Shots + "   hits " + SpikeMetrics.Hits + "   kills " + SpikeMetrics.Kills;
