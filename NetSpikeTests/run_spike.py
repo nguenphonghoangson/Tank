@@ -11,8 +11,11 @@ Results go to Benchmarks/net_spike/<condition>/{server,client1,client2}.json plu
 import json, os, subprocess, sys, time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-BIN = os.path.join(ROOT, "Builds/macOS_NetSpike/NetSpike.app/Contents/MacOS/Tank")
-OUT = os.path.join(ROOT, "Benchmarks/net_spike")
+# --match: the build with the real Crossfire map, items and dash (Builds/macOS_NetSpike_Match), results in Benchmarks/net_spike_match
+MATCH = "--match" in sys.argv
+if MATCH: sys.argv.remove("--match")
+BIN = os.path.join(ROOT, "Builds/macOS_NetSpike_Match/NetSpike.app/Contents/MacOS/Tank" if MATCH else "Builds/macOS_NetSpike/NetSpike.app/Contents/MacOS/Tank")
+OUT = os.path.join(ROOT, "Benchmarks/net_spike_match" if MATCH else "Benchmarks/net_spike")
 SECONDS = int([a for a in sys.argv[1:] if a.isdigit()][0]) if any(a.isdigit() for a in sys.argv[1:]) else 40
 # one-way latency is applied on every side, so RTT is about twice the value
 CONDITIONS = [("lan", 0, 0), ("rtt100", 50, 0), ("rtt150_loss2", 75, 2)]
@@ -73,6 +76,8 @@ def main():
                 c["shots"], c["hits_confirmed"], c["kills"], c["expected_hits_confirmed_by_server"], c["expected_hits_seen_on_screen"], c["fire_to_confirm_ms_minus_travel"].get("p50", "-"), c["fire_to_confirm_ms_minus_travel"].get("p95", "-"),
                 c["bytes_in_per_s"], c["bytes_out_per_s"]))
         print("   server: ticks %d, shots accepted %d (clients predicted %d), starved %d, dropped %d, out %s B/s, in %s B/s" % (s["server_ticks"], s["server_fires"], c1["shots"] + c2["shots"], s["server_starved_ticks"], s["server_dropped_cmds"], s["bytes_out_per_s"], s["bytes_in_per_s"]))
+        if "pickups_taken_repair_shield_speed_damage" in s:
+            print("   items taken (repair/shield/speed/damage) %s, dashes started %s, client corrections/min %s / %s" % (s["pickups_taken_repair_shield_speed_damage"], s["dashes_started"], c1["corrections_per_min"], c2["corrections_per_min"]))
 
 
 if __name__ == "__main__":

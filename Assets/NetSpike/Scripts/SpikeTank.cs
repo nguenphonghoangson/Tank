@@ -16,6 +16,7 @@ namespace TankGame.NetSpike
         public static readonly List<SpikeTank> All = new List<SpikeTank>();
         public static float RemoteViewTick;           // server tick the remote tanks are being drawn at (sent with every shot)
         public static uint LatestServerTick;
+        public static int HudHp, HudShield; public static bool HudDmg; public static float HudSpeedTime, HudDashCd;   // local tank, for the screen
         public static int JitterTicks;                // server: wait for this many queued commands before consuming (0 = off)
 
         [Header("Visual")]
@@ -31,6 +32,7 @@ namespace TankGame.NetSpike
         public TankState ServerState;
         public bool ServerDead;
         byte m_Hp = SpikeSim.MaxHp, m_Epoch = 1;
+        float m_Shield, m_ShieldTime, m_DmgTime;     // server-only buffs (not part of the movement simulation)
         uint m_Ack, m_LastQueued;
         readonly Queue<InputCmd> m_Queue = new Queue<InputCmd>();
         InputCmd m_Last, m_FireCmd;
@@ -74,7 +76,11 @@ namespace TankGame.NetSpike
                 c = m_HasLast ? m_Last : default;
                 c.buttons = 0;                                  // never repeat a shot
             }
+            float cdBefore = ServerState.dashCd;
             bool fired = SpikeSim.Step(ref ServerState, c);
+            if (ServerState.dashCd > cdBefore) SpikeMetrics.DashesStarted++;
+            if (m_ShieldTime > 0f) { m_ShieldTime -= SpikeSim.Dt; if (m_ShieldTime <= 0f) m_Shield = 0f; }
+            if (m_DmgTime > 0f) m_DmgTime -= SpikeSim.Dt;
             if (real) m_Ack = c.seq;
             m_WantFire = real && fired;
             if (m_WantFire) m_FireCmd = c;
@@ -108,25 +114,45 @@ namespace TankGame.NetSpike
                 float travel = best / SpikeSim.ShellSpeed;
                 SpikeServer.I.Pending.Add(new SpikeServer.PendingHit
                 {
-                    target = target, shooter = this, fireSeq = m_FireCmd.seq, travel = travel,
+                    target = target, shooter = this, fireSeq = m_FireCmd.seq, travel = travel, dmg = Mathf.RoundToInt(SpikeSim.Damage * (m_DmgTime > 0f ? SpikeSim.DamageMult : 1f)),
                     applyTick = tick + (uint)Mathf.CeilToInt(travel / SpikeSim.Dt),
                 });
             }
         }
 
+        /// <summary>Applies an item to this tank. Returns false when it would be wasted (a repair kit at full health), so the item stays.</summary>
+        public bool ServerApplyPickup(SpikePickup.Kind kind)
+        {
+            if (ServerDead) return false;
+            switch (kind)
+            {
+                case SpikePickup.Kind.Repair: if (m_Hp >= SpikeSim.MaxHp) return false; m_Hp = (byte)Mathf.Min(SpikeSim.MaxHp, m_Hp + SpikeSim.HealAmount); return true;
+                case SpikePickup.Kind.Shield: m_Shield = SpikeSim.ShieldAmount; m_ShieldTime = SpikeSim.ShieldSeconds; return true;
+                case SpikePickup.Kind.Speed: ServerState.speedTime = SpikeSim.SpeedSeconds; return true;
+                case SpikePickup.Kind.Damage: m_DmgTime = SpikeSim.DamageSeconds; return true;
+            }
+            return false;
+        }
+
         public void ServerDamage(SpikeTank shooter, int dmg, uint fireSeq, float travel)
         {
+            if (m_Shield > 0f)
+            {
+                float absorbed = Mathf.Min(m_Shield, dmg);
+                m_Shield -= absorbed; dmg -= Mathf.RoundToInt(absorbed);
+                if (m_Shield <= 0f) m_ShieldTime = 0f;
+            }
             int hp = Mathf.Max(0, m_Hp - dmg);
             m_Hp = (byte)hp;
             bool kill = hp == 0;
-            if (kill) { ServerDead = true; m_RespawnAt = Time.time + 2f; }
+            if (kill) { ServerDead = true; m_RespawnAt = Time.time + 2f; m_Shield = 0f; m_ShieldTime = 0f; m_DmgTime = 0f; }
             if (shooter != null && shooter.connectionToClient != null) shooter.TargetHitConfirm(shooter.connectionToClient, fireSeq, travel, kill);
         }
 
         void ServerRespawn()
         {
             ServerDead = false;
-            m_Hp = SpikeSim.MaxHp;
+            m_Hp = SpikeSim.MaxHp; m_Shield = 0f; m_ShieldTime = 0f; m_DmgTime = 0f;
             ServerState = new TankState { pos = SpikeServer.I.PickSpawn(this) };
             ServerState.yaw = ServerState.turretYaw = Mathf.Atan2(-ServerState.pos.x, -ServerState.pos.z) * Mathf.Rad2Deg;
             m_Epoch++;
@@ -137,9 +163,10 @@ namespace TankGame.NetSpike
             RpcSnapshot(new Snap
             {
                 serverTick = tick, ackSeq = m_Ack, x = ServerState.pos.x, z = ServerState.pos.z, speed = ServerState.speed, fireCd = ServerState.fireCd,
+                dashTime = ServerState.dashTime, dashCd = ServerState.dashCd, dashYaw = ServerState.dashYaw, speedTime = ServerState.speedTime,
                 yaw = (ushort)Mathf.Clamp(Mathf.RoundToInt(Mathf.Repeat(ServerState.yaw, 360f) / 360f * 65536f), 0, 65535),
                 turret = (ushort)Mathf.Clamp(Mathf.RoundToInt(Mathf.Repeat(ServerState.turretYaw, 360f) / 360f * 65536f), 0, 65535),
-                hp = m_Hp, flags = (byte)(ServerDead ? 1 : 0), epoch = m_Epoch,
+                hp = m_Hp, shield = (byte)Mathf.CeilToInt(m_Shield), flags = (byte)((ServerDead ? 1 : 0) | (m_DmgTime > 0f ? 2 : 0)), epoch = m_Epoch,
             });
         }
 
@@ -149,7 +176,8 @@ namespace TankGame.NetSpike
             SpikeMetrics.SnapshotsIn++;
             if (s.serverTick > LatestServerTick) LatestServerTick = s.serverTick;
             m_ClientDead = (s.flags & 1) != 0;
-            if (hpText != null) hpText.text = m_ClientDead ? "DEAD" : s.hp.ToString();
+            if (hpText != null) hpText.text = m_ClientDead ? "DEAD" : s.hp + (s.shield > 0 ? " +" + s.shield : "") + ((s.flags & 2) != 0 ? " x1.5" : "");
+            if (isLocalPlayer) { HudHp = s.hp; HudShield = s.shield; HudDmg = (s.flags & 2) != 0; HudSpeedTime = s.speedTime; HudDashCd = s.dashCd; }
             if (isLocalPlayer) Reconcile(s); else AddRemote(s);
         }
 
@@ -229,10 +257,10 @@ namespace TankGame.NetSpike
 
         void ClientTick()
         {
-            SampleInput(out Vector2 move, out float aimYaw, out bool fire);
+            SampleInput(out Vector2 move, out float aimYaw, out bool fire, out bool dash);
             SpikeMetrics.DbgTicks++; if (move.sqrMagnitude > 0.01f) SpikeMetrics.DbgMoving++; if (botMode) SpikeMetrics.DbgBotOn++; if (fire) SpikeMetrics.DbgFireWanted++;
             uint view = (uint)Mathf.Max(0, Mathf.RoundToInt(RemoteViewTick > 0f ? RemoteViewTick : LatestServerTick));
-            InputCmd c = SpikeSim.MakeCmd(++m_Seq, move, aimYaw, fire && !m_ClientDead, view);
+            InputCmd c = SpikeSim.MakeCmd(++m_Seq, move, aimYaw, fire && !m_ClientDead, view, dash && !m_ClientDead);
             bool fired = !m_ClientDead && SpikeSim.Step(ref m_Pred, c);
             m_CHist[m_Seq % 256] = new Entry { cmd = c, after = m_Pred, valid = true };
 
@@ -276,7 +304,8 @@ namespace TankGame.NetSpike
             if (!e.valid || e.cmd.seq != s.ackSeq) { m_Pred = server; return; }
             float err = Vector3.Distance(e.after.pos, server.pos);
             float yawErr = Mathf.Abs(Mathf.DeltaAngle(e.after.yaw, server.yaw));
-            if (err <= 0.05f && yawErr <= 2f) return;
+            bool skillErr = Mathf.Abs(e.after.speedTime - server.speedTime) > 0.2f || Mathf.Abs(e.after.dashCd - server.dashCd) > 0.2f;
+            if (err <= 0.05f && yawErr <= 2f && !skillErr) return;
 
             Vector3 visBefore = m_Pred.pos + m_VisOff;
             TankState st = server;
@@ -297,7 +326,7 @@ namespace TankGame.NetSpike
 
         static TankState FromSnap(Snap s)
         {
-            return new TankState { pos = new Vector3(s.x, 0f, s.z), yaw = s.yaw * (360f / 65536f), turretYaw = s.turret * (360f / 65536f), speed = s.speed, fireCd = s.fireCd };
+            return new TankState { pos = new Vector3(s.x, 0f, s.z), yaw = s.yaw * (360f / 65536f), turretYaw = s.turret * (360f / 65536f), speed = s.speed, fireCd = s.fireCd, dashTime = s.dashTime, dashCd = s.dashCd, dashYaw = s.dashYaw, speedTime = s.speedTime };
         }
 
         void AddRemote(Snap s)
@@ -338,12 +367,12 @@ namespace TankGame.NetSpike
         }
 
         // ------------------------------------------------------------------ input
-        void SampleInput(out Vector2 move, out float aimYaw, out bool fire)
+        void SampleInput(out Vector2 move, out float aimYaw, out bool fire, out bool dash)
         {
-            move = Vector2.zero; aimYaw = m_Pred.turretYaw; fire = false;
-            if (botMode) { BotInput(ref move, ref aimYaw, ref fire); return; }
+            move = Vector2.zero; aimYaw = m_Pred.turretYaw; fire = false; dash = false;
+            if (botMode) { BotInput(ref move, ref aimYaw, ref fire); dash = m_BotDash; return; }
             Keyboard kb = Keyboard.current; Mouse mouse = Mouse.current; Camera cam = Camera.main;
-            if (Touchscreen.current != null && (kb == null || mouse == null)) { TouchInput(ref move, ref aimYaw, ref fire); return; }
+            if (Touchscreen.current != null && (kb == null || mouse == null)) { TouchInput(ref move, ref aimYaw, ref fire); dash = m_DashLatch; m_DashLatch = false; return; }
             if (kb == null || mouse == null || cam == null) return;
             move = new Vector2((kb.dKey.isPressed ? 1f : 0f) - (kb.aKey.isPressed ? 1f : 0f), (kb.wKey.isPressed ? 1f : 0f) - (kb.sKey.isPressed ? 1f : 0f));
             Ray ray = cam.ScreenPointToRay(mouse.position.ReadValue());
@@ -353,9 +382,12 @@ namespace TankGame.NetSpike
                 aimYaw = Mathf.Atan2(p.x, p.z) * Mathf.Rad2Deg;
             }
             fire = mouse.leftButton.isPressed;
+            dash = kb.spaceKey.isPressed;
         }
 
         // Spike-grade touch controls: left half = floating move stick, right half = floating aim stick (fires while held).
+        public static Rect DashButton { get { float r = Mathf.Max(70f, Screen.dpi > 0f ? Screen.dpi * 0.3f : 110f); return new Rect(Screen.width - r * 2.6f, r * 0.5f, r * 1.6f, r * 1.6f); } }   // bottom-left origin (touch space)
+        bool m_DashLatch;
         int m_MoveId = -1, m_AimId = -1;
         Vector2 m_MoveOrigin, m_AimOrigin;
         void TouchInput(ref Vector2 move, ref float aimYaw, ref bool fire)
@@ -369,6 +401,7 @@ namespace TankGame.NetSpike
                 if (id == m_MoveId) { moveSeen = true; move = Vector2.ClampMagnitude((pos - m_MoveOrigin) / radius, 1f); continue; }
                 if (id == m_AimId) { aimSeen = true; AimFrom(pos - m_AimOrigin, radius, ref aimYaw, ref fire); continue; }
                 if (t.phase.ReadValue() != UnityEngine.InputSystem.TouchPhase.Began) continue;
+                if (DashButton.Contains(pos)) { m_DashLatch = true; continue; }
                 if (pos.x < Screen.width * 0.5f && m_MoveId < 0) { m_MoveId = id; m_MoveOrigin = pos; moveSeen = true; }
                 else if (pos.x >= Screen.width * 0.5f && m_AimId < 0) { m_AimId = id; m_AimOrigin = pos; aimSeen = true; }
             }
@@ -382,6 +415,12 @@ namespace TankGame.NetSpike
             fire = true;
         }
 
+        SpikePickup[] m_BotPickups;
+        bool m_BotDash;
+        float m_BotCheck, m_BotWanderUntil, m_BotLastDash;
+        Vector3 m_BotLastPos;
+        Vector2 m_BotWanderDir;
+
         void BotInput(ref Vector2 move, ref float aimYaw, ref bool fire)
         {
             float t = Time.time - m_BotStart;
@@ -392,6 +431,26 @@ namespace TankGame.NetSpike
             Vector2 radial = r > 0.1f ? p2 / r : Vector2.up;
             Vector2 tangent = new Vector2(-radial.y, radial.x) * ((netId % 2 == 0) ? 1f : -1f);
             move = tangent + radial * Mathf.Clamp((24f - r) * 0.25f, -1f, 1f);
+            // go for the nearest item when there is one; wander briefly when blocked
+            if (m_BotPickups == null || m_BotPickups.Length == 0) m_BotPickups = FindObjectsByType<SpikePickup>(FindObjectsSortMode.None);
+            SpikePickup goal = null; float gd = 70f;
+            foreach (SpikePickup pk in m_BotPickups)
+            {
+                if (pk == null || !pk.Available) continue;
+                float d = Vector3.Distance(pk.transform.position, p);
+                if (d < gd) { gd = d; goal = pk; }
+            }
+            if (goal != null) { Vector3 to2 = goal.transform.position - p; move = new Vector2(to2.x, to2.z).normalized; }
+            if (Time.time >= m_BotCheck)
+            {
+                m_BotCheck = Time.time + 1f;
+                if (move.sqrMagnitude > 0.1f && (p - m_BotLastPos).magnitude < 1f) m_BotWanderUntil = Time.time + 1.5f;
+                if (Time.time < m_BotWanderUntil) m_BotWanderDir = Random.insideUnitCircle.normalized;
+                m_BotLastPos = p;
+            }
+            if (Time.time < m_BotWanderUntil) move = m_BotWanderDir;
+            m_BotDash = move.sqrMagnitude > 0.1f && Time.time - m_BotLastDash > 5f;
+            if (m_BotDash) m_BotLastDash = Time.time;
             SpikeTank other = null;
             foreach (SpikeTank o in All) if (o != this && o.RenderPos != Vector3.zero) { other = o; break; }
             if (other != null)

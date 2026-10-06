@@ -44,3 +44,15 @@ Mirror can carry this model: prediction, reconciliation, interpolation and lag-c
 - `SpikeMetrics` still contains `Dbg*` diagnostic counters to remove before any reuse.
 - Unverified: real network, iPhone as client, collisions, host vs dedicated server split.
 - Studio decisions (cross-play, region, hosting, budget, matchmaking) remain in `Networking_Requirements_and_Options.md` §6.
+
+## Match scene: real map, items, dash (`NetSpike_Match`)
+
+Crossfire (120 x 120, 20 spawn points, 14 item slots) imported as geometry; flags are inert (not networked yet). Dash is part of the predicted simulation (`SpikeSim`), the speed item is a predicted state, shield/damage/repair are server-only. Items are rolled by the server (weighted random, respawn 25–40 s) and synced as one byte per slot; collection is decided from the authoritative tank position. Bots seek the nearest item and dash every 5 s. 60 s runs, 2 bots:
+
+| Condition | Items taken (repair/shield/speed/damage) | Dashes | Corrections /min | Seen-on-screen hits agreed |
+|---|---|---|---|---|
+| LAN | 7 / 4 / 7 / 1 | 18 | 6, 9 | 32/39, 26/32 |
+| RTT ~155 ms | 7 / 6 / 5 / 1 | 21 | 5, 12 | 26/37, 17/20 |
+| RTT ~204 ms, 2% loss | 7 / 5 / 4 / 1 | 17 | 15, 11 | 26/32, 24/32 |
+
+Server bandwidth rose to ~7.5 KB/s out (snapshot carries dash/speed/shield fields). Weapons pickups, cores, flags and scoring are not in the spike yet.

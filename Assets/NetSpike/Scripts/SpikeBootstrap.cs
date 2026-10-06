@@ -105,6 +105,15 @@ namespace TankGame.NetSpike
             string line = "rtt " + (NetworkClient.active ? Mathf.RoundToInt((float)(NetworkTime.rtt * 1000.0)).ToString() : "-") + " ms   corrections " + SpikeMetrics.ReconCount +
                           "   >0.5 m: " + SpikeMetrics.ReconOver05 + "   shots " + SpikeMetrics.Shots + "   hits " + SpikeMetrics.Hits + "   kills " + SpikeMetrics.Kills;
             GUI.Label(new Rect(10f, Screen.height - 28f, 900f, 24f), line);
+            if (me != null && NetworkClient.active)
+            {
+                string buffs = "HP " + SpikeTank.HudHp + (SpikeTank.HudShield > 0 ? "  shield " + SpikeTank.HudShield : "") + (SpikeTank.HudDmg ? "  damage x1.5" : "") + (SpikeTank.HudSpeedTime > 0f ? "  speed " + SpikeTank.HudSpeedTime.ToString("0.0") + "s" : "");
+                GUI.Label(new Rect(10f, 10f, 700f, 24f), buffs);
+                Rect b = SpikeTank.DashButton;
+                var r = new Rect(b.x, Screen.height - b.yMax, b.width, b.height);
+                float cd = SpikeTank.HudDashCd;
+                GUI.Box(r, cd > 0.05f ? "DASH\n" + cd.ToString("0.0") : "DASH");
+            }
             if (me == null && NetworkClient.active) GUI.Label(new Rect(10f, 10f, 400f, 24f), "connecting...");
         }
     }

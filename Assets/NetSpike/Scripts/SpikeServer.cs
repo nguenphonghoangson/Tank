@@ -10,11 +10,19 @@ namespace TankGame.NetSpike
         public static SpikeServer I { get; private set; }
         public uint Tick { get; private set; }
 
-        public struct PendingHit { public SpikeTank target, shooter; public uint applyTick; public uint fireSeq; public float travel; }
+        public struct PendingHit { public SpikeTank target, shooter; public uint applyTick; public uint fireSeq; public float travel; public int dmg; }
 
         readonly List<SpikeTank> m_Tanks = new List<SpikeTank>();
         public readonly List<PendingHit> Pending = new List<PendingHit>();
         float m_Acc;
+
+        [Header("Items")]
+        public GameObject pickupPrefab;
+        public Vector3[] pickupPoints = new Vector3[0];
+        public float pickupRespawnScale = 1f;
+        readonly List<SpikePickup> m_Pickups = new List<SpikePickup>();
+        bool m_PickupsSpawned;
+        System.Random m_Rng;
 
         public Vector3[] spawnPoints =
         {
@@ -52,11 +60,39 @@ namespace TankGame.NetSpike
             }
         }
 
+        void SpawnPickupsOnce()
+        {
+            if (m_PickupsSpawned) return;
+            m_PickupsSpawned = true;
+            m_Rng = new System.Random(12345);
+            if (pickupPrefab == null) return;
+            foreach (Vector3 pos in pickupPoints)
+            {
+                GameObject go = Instantiate(pickupPrefab, pos, Quaternion.identity);
+                NetworkServer.Spawn(go);
+                SpikePickup p = go.GetComponent<SpikePickup>();
+                p.ServerRoll(m_Rng, true);
+                m_Pickups.Add(p);
+            }
+        }
+
         void StepTick()
         {
             Tick++;
             SpikeMetrics.ServerTicks++;
+            SpawnPickupsOnce();
             foreach (SpikeTank t in m_Tanks) t.ServerStep(Tick);
+            foreach (SpikePickup p in m_Pickups)
+            {
+                p.ServerTick(Time.time, m_Rng);
+                if (!p.Available) continue;
+                foreach (SpikeTank t in m_Tanks)
+                {
+                    if (t.ServerDead) continue;
+                    Vector3 d = t.ServerState.pos - p.transform.position; d.y = 0f;
+                    if (d.sqrMagnitude < SpikePickup.Radius * SpikePickup.Radius && t.ServerApplyPickup(p.CurrentKind)) { SpikeMetrics.PickupsTaken[(int)p.CurrentKind]++; p.ServerTake(Time.time, m_Rng, pickupRespawnScale); break; }
+                }
+            }
             foreach (SpikeTank t in m_Tanks) t.ServerResolveFire(Tick);
 
             for (int i = Pending.Count - 1; i >= 0; i--)
@@ -64,7 +100,7 @@ namespace TankGame.NetSpike
                 PendingHit h = Pending[i];
                 if (Tick < h.applyTick) continue;
                 Pending.RemoveAt(i);
-                if (h.target != null && !h.target.ServerDead) h.target.ServerDamage(h.shooter, SpikeSim.Damage, h.fireSeq, h.travel);
+                if (h.target != null && !h.target.ServerDead) h.target.ServerDamage(h.shooter, h.dmg, h.fireSeq, h.travel);
             }
             foreach (SpikeTank t in m_Tanks) t.ServerSendSnapshot(Tick);
         }
