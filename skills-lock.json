@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "skills": {
+    "scenario-unity-expert": {
+      "source": "scenario-labs/skills",
+      "sourceType": "github",
+      "skillPath": "skills/game-engines/unity/scenario-unity-expert/SKILL.md",
+      "computedHash": "bc4d08a2f8fd15df7528534428bed1c24911f3bab3d2978c82c03400ee8a9448"
+    }
+  }
+}
