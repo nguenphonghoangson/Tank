@@ -285,6 +285,7 @@ namespace TankGame.Prototype.Editor
                 case 13: // damage the tank and put it on a repair pickup
                 {
                     Pickup pk = s_Match.Layout.pickups[0];
+                    pk.Force(PickupKind.Repair);                                  // items are random: make this slot a repair kit
                     s_Tank.Command = default;
                     s_Tank.TakeDamage(60, s_Tank.transform.position, Vector3.forward, null);
                     s_HpBefore = s_Tank.Hp;

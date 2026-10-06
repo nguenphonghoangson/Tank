@@ -77,6 +77,23 @@ namespace TankGame.Prototype
             Available = true;
         }
 
+        /// <summary>Test/debug: make this slot show a specific kind right now. Returns false if the slot has no such variant.</summary>
+        public bool Force(PickupKind wanted)
+        {
+            foreach (PickupVariant v in variants)
+            {
+                if (v.kind != wanted) continue;
+                foreach (PickupVariant o in variants) o.root.SetActive(false);
+                m_Current = v;
+                kind = v.kind; label = v.label; color = v.color; weapon = v.weapon; m_RespawnSeconds = v.respawnSeconds;
+                m_Visual = v.visual; m_VisualRest = m_Visual.localPosition;
+                v.root.SetActive(true);
+                Available = true;
+                return true;
+            }
+            return false;
+        }
+
         void Update()
         {
             if (!Available)
