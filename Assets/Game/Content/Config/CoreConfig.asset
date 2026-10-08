@@ -1,0 +1,135 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 469fe4dfa98314855aaa7bf3ca7ee5dc, type: 3}
+  m_Name: CoreConfig
+  m_EditorClassIdentifier: Tank.Gameplay::Tank.Gameplay.Config.CoreConfig
+  cores:
+  - name: Heavy Plating
+    description: +40 max HP, 8% slower
+    color: {r: 0.55, g: 0.75, b: 1, a: 1}
+    maxHpBonus: 40
+    speedMult: 0.92
+    damageMult: 1
+    fireIntervalMult: 1
+    ammoMult: 1
+    dashCooldownMult: 1
+    splashBonus: 0
+    lifesteal: 0
+    regenPerSecond: 0
+  - name: Overdrive Engine
+    description: +18% move speed
+    color: {r: 1, g: 0.85, b: 0.3, a: 1}
+    maxHpBonus: 0
+    speedMult: 1.18
+    damageMult: 1
+    fireIntervalMult: 1
+    ammoMult: 1
+    dashCooldownMult: 1
+    splashBonus: 0
+    lifesteal: 0
+    regenPerSecond: 0
+  - name: Heavy Shells
+    description: +30% damage, 15% slower fire
+    color: {r: 1, g: 0.5, b: 0.3, a: 1}
+    maxHpBonus: 0
+    speedMult: 1
+    damageMult: 1.3
+    fireIntervalMult: 1.15
+    ammoMult: 1
+    dashCooldownMult: 1
+    splashBonus: 0
+    lifesteal: 0
+    regenPerSecond: 0
+  - name: Rapid Loader
+    description: 22% faster fire, -10% damage
+    color: {r: 1, g: 0.95, b: 0.5, a: 1}
+    maxHpBonus: 0
+    speedMult: 1
+    damageMult: 0.9
+    fireIntervalMult: 0.78
+    ammoMult: 1
+    dashCooldownMult: 1
+    splashBonus: 0
+    lifesteal: 0
+    regenPerSecond: 0
+  - name: Quick Hands
+    description: +40% ammo from weapon pickups
+    color: {r: 0.7, g: 1, b: 0.7, a: 1}
+    maxHpBonus: 0
+    speedMult: 1
+    damageMult: 1
+    fireIntervalMult: 1
+    ammoMult: 1.4
+    dashCooldownMult: 1
+    splashBonus: 0
+    lifesteal: 0
+    regenPerSecond: 0
+  - name: Blast Rounds
+    description: 'Shells explode: +1.8 m splash'
+    color: {r: 1, g: 0.6, b: 0.2, a: 1}
+    maxHpBonus: 0
+    speedMult: 1
+    damageMult: 1
+    fireIntervalMult: 1
+    ammoMult: 1
+    dashCooldownMult: 1
+    splashBonus: 1.8
+    lifesteal: 0
+    regenPerSecond: 0
+  - name: Afterburner
+    description: Dash cooldown -45%
+    color: {r: 0.6, g: 0.9, b: 1, a: 1}
+    maxHpBonus: 0
+    speedMult: 1
+    damageMult: 1
+    fireIntervalMult: 1
+    ammoMult: 1
+    dashCooldownMult: 0.55
+    splashBonus: 0
+    lifesteal: 0
+    regenPerSecond: 0
+  - name: Repair Nanites
+    description: Regenerate 4 HP/s out of combat
+    color: {r: 0.45, g: 1, b: 0.6, a: 1}
+    maxHpBonus: 0
+    speedMult: 1
+    damageMult: 1
+    fireIntervalMult: 1
+    ammoMult: 1
+    dashCooldownMult: 1
+    splashBonus: 0
+    lifesteal: 0
+    regenPerSecond: 4
+  - name: Vampiric Rounds
+    description: Heal 25% of damage dealt
+    color: {r: 1, g: 0.4, b: 0.5, a: 1}
+    maxHpBonus: 0
+    speedMult: 1
+    damageMult: 1
+    fireIntervalMult: 1
+    ammoMult: 1
+    dashCooldownMult: 1
+    splashBonus: 0
+    lifesteal: 0.25
+    regenPerSecond: 0
+  - name: Glass Cannon
+    description: +50% damage, -25 max HP
+    color: {r: 1, g: 0.35, b: 0.35, a: 1}
+    maxHpBonus: -25
+    speedMult: 1
+    damageMult: 1.5
+    fireIntervalMult: 1
+    ammoMult: 1
+    dashCooldownMult: 1
+    splashBonus: 0
+    lifesteal: 0
+    regenPerSecond: 0

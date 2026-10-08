@@ -1,3 +1,4 @@
+using TankGame.Prototype;
 using UnityEngine;
 
 namespace TankGame.NetSpike
@@ -11,7 +12,7 @@ namespace TankGame.NetSpike
         public const int TickRate = 30;
         public const float Dt = 1f / TickRate;
         public const float MoveSpeed = 14f, Accel = 80f, Brake = 150f, HullTurn = 540f, TurretTurn = 720f;
-        public const float FireInterval = 0.33f, ShellSpeed = 55f, Range = 70f, MuzzleHeight = 1.25f, MuzzleForward = 2.5f;
+        public const float FireInterval = 0.33f, ShellSpeed = 55f, Range = 70f, MuzzleHeight = 1.6f, MuzzleForward = 2.35f;     // muzzle of the pack tank at 1.8x
         public const int Damage = 25, MaxHp = 100;
         public const float DashSpeed = 36f, DashDuration = 0.22f, DashCooldown = 4f;
         public const float SpeedMult = 1.4f, SpeedSeconds = 8f, DamageMult = 1.5f, DamageSeconds = 10f, ShieldSeconds = 12f;
@@ -27,6 +28,9 @@ namespace TankGame.NetSpike
             new WeaponSpec { name = "MG", damage = 8, interval = 0.085f, speed = 70f, range = 48f, pellets = 1, spread = 3.5f, ammo = 45 },
             new WeaponSpec { name = "SHOTGUN", damage = 9, interval = 0.75f, speed = 44f, range = 26f, pellets = 7, spread = 18f, ammo = 7 },
             new WeaponSpec { name = "ROCKET", damage = 55, interval = 1.0f, speed = 32f, range = 70f, pellets = 1, spread = 0f, ammo = 4, splashRadius = 5.5f, splashFactor = 0.6f },
+            // from the new weapon pack, first-pass numbers (not measured): Gigavolt is a near-instant beam, Grenade a slow short-range burst
+            new WeaponSpec { name = "GIGAVOLT", damage = 35, interval = 0.9f, speed = 140f, range = 60f, pellets = 1, spread = 0f, ammo = 5 },
+            new WeaponSpec { name = "GRENADE", damage = 40, interval = 1.2f, speed = 26f, range = 34f, pellets = 1, spread = 0f, ammo = 5, splashRadius = 4f, splashFactor = 0.6f },
         };
         public static int LastFiredWeapon;      // weapon of the shot the last Step produced (read right after Step)
 
@@ -42,7 +46,7 @@ namespace TankGame.NetSpike
             return Quaternion.Euler(0f, s.turretYaw + off, 0f) * Vector3.forward;
         }
 
-        public const float BoxHalfX = 1.05f, BoxHalfZ = 1.65f;
+        public const float BoxHalfX = 1.3f, BoxHalfZ = 1.5f;       // footprint of the pack tank at 1.8x (hull 1.42 x 1.55 m before scaling)
 
         public static InputCmd MakeCmd(uint seq, Vector2 move, float aimYawDeg, bool fire, uint viewTick, bool dash = false)
         {
@@ -66,6 +70,7 @@ namespace TankGame.NetSpike
         /// <summary>Advances one tick. Returns true when this tick fires a shot (cooldown included, identical on server and client).</summary>
         public static bool Step(ref TankState s, InputCmd c)
         {
+            TankModifiers mods = SpikeCores.Mods(s.cores);
             Vector2 mv = new Vector2(c.moveX / 127f, c.moveZ / 127f);
             if (mv.sqrMagnitude > 1f) mv.Normalize();
 
@@ -74,9 +79,9 @@ namespace TankGame.NetSpike
             {
                 s.dashYaw = mv.sqrMagnitude > 0.0025f ? Mathf.Atan2(mv.x, mv.y) * Mathf.Rad2Deg : s.yaw;
                 s.dashTime = DashDuration;
-                s.dashCd = DashCooldown;
+                s.dashCd = DashCooldown * mods.dashCooldownMult;
             }
-            float topSpeed = s.speedTime > 0f ? MoveSpeed * SpeedMult : MoveSpeed;
+            float topSpeed = (s.speedTime > 0f ? MoveSpeed * SpeedMult : MoveSpeed) * mods.speedMult;
             s.speedTime = Mathf.Max(0f, s.speedTime - Dt);
 
             if (s.dashTime > 0f)
@@ -108,8 +113,10 @@ namespace TankGame.NetSpike
                 s.pos += fwd * (s.speed * Dt);
                 SpikeWorld.Resolve(ref s.pos, s.yaw);
                 // a head-on block stops the drive; glancing contact keeps speed
-                float moved = Vector3.Dot(s.pos - before, fwd) / Dt;
-                if (moved < s.speed * 0.5f) { s.speed = Mathf.Max(0f, moved); SpikeMetrics.DbgStop++; }
+                // a glancing contact keeps its speed, so the tank slides along the wall; only a nearly head-on block (less than 30% of the drive
+                // gets through) stops it. Resetting to the slide speed every tick would leave it creeping at a few m/s.
+                float moved = (s.pos - before).magnitude / Dt;
+                if (moved < s.speed * 0.3f) { s.speed = Mathf.Max(0f, moved); SpikeMetrics.DbgStop++; }
             }
             SpikeMetrics.DbgPos = s.pos;
 
@@ -119,7 +126,7 @@ namespace TankGame.NetSpike
             if (Fire(c) && s.fireCd <= 0f)
             {
                 LastFiredWeapon = s.weapon;
-                s.fireCd = Weapons[s.weapon].interval;
+                s.fireCd = Weapons[s.weapon].interval * mods.fireIntervalMult;
                 if (s.weapon != 0 && --s.ammo <= 0) { s.weapon = 0; s.ammo = 0; }
                 return true;
             }

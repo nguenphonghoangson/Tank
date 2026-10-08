@@ -1,0 +1,32 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: dde15b04a85d948c5a6384ec67fa4b44, type: 3}
+  m_Name: FxConfig
+  m_EditorClassIdentifier: Tank.Gameplay::Tank.Gameplay.Config.FxConfig
+  tankHitVfx: {fileID: 5759983070458863165, guid: 87befd8cc9a6b4a09b60d3e6240ebd3d, type: 3}
+  tankExplosionVfx: {fileID: 7190363792912671444, guid: 3666131ddfe0b45c4a2d3a3f56d33d04, type: 3}
+  tankDebrisVfx: {fileID: 3668945157534798243, guid: b90ceadcaef5d42b3ad655849d77802e, type: 3}
+  spawnVfx: {fileID: 3519182449615427783, guid: 8c1d11479a8034286838510befe1ca10, type: 3}
+  dashVfx: {fileID: 4792060566560177256, guid: b8d75acab267d4e1193a2afa6374cefd, type: 3}
+  tankHitSfx: {fileID: 11400000, guid: 5bed097bd03544f8697fabf88da1bb07, type: 2}
+  tankExplosionSfx: {fileID: 11400000, guid: edc076fcee3da4dceb04f0e827f983b7, type: 2}
+  spawnSfx: {fileID: 11400000, guid: 045c48a0e531545a7a99e1e687ad2b25, type: 2}
+  readySfx: {fileID: 11400000, guid: 767815e559e624d33a7677ebf771a0de, type: 2}
+  corePickedVfx: {fileID: 5987137224110480350, guid: 351e8bff09e304c6b815fcbec7e30e24, type: 3}
+  corePickedSfx: {fileID: 11400000, guid: 767815e559e624d33a7677ebf771a0de, type: 2}
+  coreOfferedSfx: {fileID: 11400000, guid: 6bb1b9bedcc354f37a7fb1ab0da156d8, type: 2}
+  countdownSfx: {fileID: 11400000, guid: e709e25beb3204feabc0e8facc80300b, type: 2}
+  celebrationSfx: {fileID: 11400000, guid: a5b8ade354de14e2a813e861ca2ec528, type: 2}
+  scoreChangeSfx: {fileID: 11400000, guid: be57bad24e4114dd4b1a3471dbf554c9, type: 2}
+  music: {fileID: 8300000, guid: 3273cb8ed31b38543835786a3bfa4ed0, type: 3}
+  musicVolume: 0.35
+  musicGroup: {fileID: -8938275100154560894, guid: 19d51d8e32ac4a54894d7622b5b3b01c, type: 2}

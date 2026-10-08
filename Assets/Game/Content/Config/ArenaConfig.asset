@@ -1,0 +1,81 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 74912eccdf6e34943b99259cb38017b5, type: 3}
+  m_Name: ArenaConfig
+  m_EditorClassIdentifier: Tank.Gameplay::Tank.Gameplay.Config.ArenaConfig
+  playableSemiAxes: {x: 26.5, y: 17.75}
+  blocks:
+  - center: {x: 8, y: 6}
+    halfExtents: {x: 1.8496213, y: 1.7239965}
+    yaw: 20.000002
+  - center: {x: -8, y: -6}
+    halfExtents: {x: 1.8496213, y: 1.7239965}
+    yaw: 20.000002
+  - center: {x: 8, y: -6}
+    halfExtents: {x: 1.8496213, y: 1.7239965}
+    yaw: 340
+  - center: {x: -8, y: 6}
+    halfExtents: {x: 1.8496213, y: 1.7239965}
+    yaw: 340
+  - center: {x: 15.850435, y: 9.788893}
+    halfExtents: {x: 2.9042916, y: 3.1406221}
+    yaw: 0
+  - center: {x: -16.149565, y: -10.211107}
+    halfExtents: {x: 2.9042916, y: 3.1406221}
+    yaw: 0
+  - center: {x: 15.788893, y: -9.850434}
+    halfExtents: {x: 2.9042923, y: 3.1406229}
+    yaw: 90
+  - center: {x: -16.211107, y: 10.149566}
+    halfExtents: {x: 2.9042923, y: 3.1406229}
+    yaw: 90
+  - center: {x: 3.0319633, y: 8.037334}
+    halfExtents: {x: 0.7624835, y: 0.76785433}
+    yaw: 0
+  - center: {x: -2.9718125, y: 8.032547}
+    halfExtents: {x: 0.7717856, y: 0.7726413}
+    yaw: 0
+  - center: {x: -2.9680367, y: -7.962666}
+    halfExtents: {x: 0.7624835, y: 0.76785433}
+    yaw: 0
+  - center: {x: 3.0281875, y: -7.967453}
+    halfExtents: {x: 0.7717856, y: 0.7726413}
+    yaw: 0
+  - center: {x: 0.00000011920929, y: 13}
+    halfExtents: {x: 2.2902713, y: 2.2623005}
+    yaw: 0
+  - center: {x: 0.00000011920929, y: -13}
+    halfExtents: {x: 2.2902713, y: 2.2623005}
+    yaw: 0
+  - center: {x: 24, y: -0.6745398}
+    halfExtents: {x: 2.210164, y: 2.0100772}
+    yaw: 0
+  - center: {x: -24, y: -0.6745398}
+    halfExtents: {x: 2.210164, y: 2.0100772}
+    yaw: 0
+  spawnPoints:
+  - {x: -21, y: -6}
+  - {x: -21, y: 6}
+  - {x: 21, y: -6}
+  - {x: 21, y: 6}
+  - {x: -6, y: -14}
+  - {x: 6, y: -14}
+  - {x: -6, y: 14}
+  - {x: 6, y: 14}
+  itemSlots:
+  - {x: -12, y: 0}
+  - {x: 12, y: 0}
+  - {x: 0, y: 0}
+  - {x: -10, y: -13}
+  - {x: 10, y: -13}
+  - {x: -10, y: 13}
+  - {x: 10, y: 13}

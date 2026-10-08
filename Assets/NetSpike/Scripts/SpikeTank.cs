@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using Mirror;
+using TankGame.Prototype;
 using UnityEngine;
 using UnityEngine.InputSystem;
 
@@ -16,7 +17,7 @@ namespace TankGame.NetSpike
         public static readonly List<SpikeTank> All = new List<SpikeTank>();
         public static float RemoteViewTick;           // server tick the remote tanks are being drawn at (sent with every shot)
         public static uint LatestServerTick;
-        public static int HudHp, HudShield; public static bool HudDmg; public static float HudSpeedTime, HudDashCd; public static int HudWeapon, HudAmmo;   // local tank, for the screen
+        public static int HudHp, HudShield; public static ushort HudCores; public static bool HudDmg; public static float HudSpeedTime, HudDashCd; public static int HudWeapon, HudAmmo;   // local tank, for the screen
         public static int JitterTicks;                // server: wait for this many queued commands before consuming (0 = off)
 
         [Header("Visual")]
@@ -26,6 +27,7 @@ namespace TankGame.NetSpike
         public GameObject flash;
         public Material shellMaterial;
         public GameObject shellPrefab;                // the prototype's projectile look (no Projectile script)
+        public GameObject[] shellOverrides;           // per weapon: the weapon pack's own shot visual; null entries fall back to shellPrefab (tinted and scaled)
 
         public bool botMode;                          // scripted input instead of the keyboard (automated tests)
 
@@ -40,12 +42,18 @@ namespace TankGame.NetSpike
         bool m_HasLast, m_WantFire, m_Primed;
         int m_FireWeapon;
         float m_RespawnAt;
+        int[] m_Offer; float m_OfferUntil; int m_PicksOwed; float m_LastDamagedAt, m_RegenAcc;   // server: core offers (cores themselves live in ServerState.cores)
+        static readonly System.Random s_CoreRng = new System.Random();
+        public int ServerMaxHp => Mathf.Max(30, SpikeSim.MaxHp + SpikeCores.Mods(ServerState.cores).maxHpBonus);
+        readonly Dictionary<uint, float> m_Damagers = new Dictionary<uint, float>();   // server: who hurt this tank and when, for assists
+        readonly List<uint> m_Assisters = new List<uint>();
         readonly TankState[] m_SHist = new TankState[64];
         readonly uint[] m_SHistTick = new uint[64];
 
         public override void OnStartServer()
         {
             SpikeServer.I.Register(this);
+            if (SpikeMatch.I != null) m_PicksOwed = SpikeMatch.I.Phase + 1;
             ServerState = new TankState { pos = SpikeServer.I.PickSpawn(this) };
             ServerState.yaw = ServerState.turretYaw = Mathf.Atan2(-ServerState.pos.x, -ServerState.pos.z) * Mathf.Rad2Deg;
         }
@@ -83,6 +91,7 @@ namespace TankGame.NetSpike
             if (ServerState.dashCd > cdBefore) SpikeMetrics.DashesStarted++;
             if (m_ShieldTime > 0f) { m_ShieldTime -= SpikeSim.Dt; if (m_ShieldTime <= 0f) m_Shield = 0f; }
             if (m_DmgTime > 0f) m_DmgTime -= SpikeSim.Dt;
+            ServerCoreTick();
             if (real) m_Ack = c.seq;
             m_WantFire = real && fired;
             if (m_WantFire) { m_FireCmd = c; m_FireWeapon = SpikeSim.LastFiredWeapon; }
@@ -104,7 +113,10 @@ namespace TankGame.NetSpike
             Vector3 origin = SpikeSim.MuzzleOrigin(s);
             uint view = m_FireCmd.viewTick;
             if (view > tick || tick - view > 20) view = tick;                 // never rewind more than ~0.66 s
-            float mult = m_DmgTime > 0f ? SpikeSim.DamageMult : 1f;
+            TankModifiers mods = SpikeCores.Mods(ServerState.cores);
+            float mult = (m_DmgTime > 0f ? SpikeSim.DamageMult : 1f) * mods.damageMult;
+            float splashR = w.splashRadius > 0f ? w.splashRadius + mods.splashBonus : mods.splashBonus;     // Blast Rounds gives any weapon a burst
+            float splashF = w.splashRadius > 0f ? w.splashFactor : 0.6f;
             var dirs = new Vector3[w.pellets]; var dists = new float[w.pellets];
             bool confirmSent = false;
             for (int i = 0; i < w.pellets; i++)
@@ -119,12 +131,12 @@ namespace TankGame.NetSpike
                 }
                 dirs[i] = dir; dists[i] = best;
                 bool wall = target == null && best < w.range - 0.01f;
-                if (target == null && !(w.splashRadius > 0f && wall)) continue;
+                if (target == null && !(splashR > 0f && wall)) continue;
                 float travel = best / w.speed;
                 SpikeServer.I.Pending.Add(new SpikeServer.PendingHit
                 {
                     target = target, shooter = this, fireSeq = m_FireCmd.seq, travel = travel, dmg = Mathf.RoundToInt(w.damage * mult), confirm = target != null && !confirmSent,
-                    impact = origin + dir * best, splashR = w.splashRadius, splashDmg = Mathf.RoundToInt(w.damage * w.splashFactor * mult),
+                    impact = origin + dir * best, splashR = splashR, splashDmg = Mathf.RoundToInt(w.damage * splashF * mult),
                     applyTick = tick + (uint)Mathf.CeilToInt(travel / SpikeSim.Dt),
                 });
                 if (target != null) confirmSent = true;
@@ -138,13 +150,15 @@ namespace TankGame.NetSpike
             if (ServerDead) return false;
             switch (kind)
             {
-                case SpikePickup.Kind.Repair: if (m_Hp >= SpikeSim.MaxHp) return false; m_Hp = (byte)Mathf.Min(SpikeSim.MaxHp, m_Hp + SpikeSim.HealAmount); return true;
+                case SpikePickup.Kind.Repair: if (m_Hp >= ServerMaxHp) return false; m_Hp = (byte)Mathf.Min(ServerMaxHp, m_Hp + SpikeSim.HealAmount); return true;
                 case SpikePickup.Kind.Shield: m_Shield = SpikeSim.ShieldAmount; m_ShieldTime = SpikeSim.ShieldSeconds; return true;
                 case SpikePickup.Kind.Speed: ServerState.speedTime = SpikeSim.SpeedSeconds; return true;
                 case SpikePickup.Kind.Damage: m_DmgTime = SpikeSim.DamageSeconds; return true;
                 case SpikePickup.Kind.MachineGun: return GrantWeapon(1);
                 case SpikePickup.Kind.Shotgun: return GrantWeapon(2);
                 case SpikePickup.Kind.Rocket: return GrantWeapon(3);
+                case SpikePickup.Kind.Gigavolt: return GrantWeapon(4);
+                case SpikePickup.Kind.Grenade: return GrantWeapon(5);
             }
             return false;
         }
@@ -152,7 +166,7 @@ namespace TankGame.NetSpike
         bool GrantWeapon(int idx)
         {
             if (ServerState.weapon == idx) return false;
-            ServerState.weapon = (byte)idx; ServerState.ammo = (byte)SpikeSim.Weapons[idx].ammo;
+            ServerState.weapon = (byte)idx; ServerState.ammo = (byte)Mathf.Min(255, Mathf.RoundToInt(SpikeSim.Weapons[idx].ammo * SpikeCores.Mods(ServerState.cores).magazineMult));
             ServerState.fireCd = Mathf.Min(ServerState.fireCd, 0.15f);
             return true;
         }
@@ -166,19 +180,104 @@ namespace TankGame.NetSpike
                 if (m_Shield <= 0f) m_ShieldTime = 0f;
             }
             int hp = Mathf.Max(0, m_Hp - dmg);
+            int dealt = m_Hp - hp;
             m_Hp = (byte)hp;
+            m_LastDamagedAt = Time.time;
+            if (shooter != null && shooter != this && !shooter.ServerDead && dealt > 0)
+            {
+                float ls = SpikeCores.Mods(shooter.ServerState.cores).lifesteal;      // Vampiric Rounds
+                if (ls > 0f) shooter.m_Hp = (byte)Mathf.Min(shooter.ServerMaxHp, shooter.m_Hp + Mathf.RoundToInt(dealt * ls));
+            }
             bool kill = hp == 0;
-            if (kill && shooter != null && SpikeMatch.I != null) SpikeMatch.I.ServerKill(shooter, this);
+            if (shooter != null && shooter != this) m_Damagers[shooter.netId] = Time.time;
+            if (kill && shooter != null && SpikeMatch.I != null)
+            {
+                m_Assisters.Clear();
+                foreach (KeyValuePair<uint, float> d in m_Damagers)
+                    if (d.Key != shooter.netId && Time.time - d.Value <= SpikeMatch.AssistSeconds && SpikeMatch.TeamOf(d.Key) != SpikeMatch.TeamOf(netId)) m_Assisters.Add(d.Key);
+                SpikeMatch.I.ServerKill(shooter, this, m_Assisters);
+            }
+            if (kill) m_Damagers.Clear();
             if (kill) RpcExplodeFx(ServerState.pos + Vector3.up * 0.8f); else RpcHitFx(ServerState.pos + Vector3.up * 0.9f);
             if (kill) { ServerDead = true; m_RespawnAt = Time.time + 2f; m_Shield = 0f; m_ShieldTime = 0f; m_DmgTime = 0f; }
             if (confirm && shooter != null && shooter.connectionToClient != null) shooter.TargetHitConfirm(shooter.connectionToClient, fireSeq, travel, kill);
         }
 
+        // ---- cores: the server offers three unowned cores per phase, the owner picks one (or gets a random one when the timer runs out)
+        public static int[] HudOffers; public static float HudOfferUntil;      // local tank: what the screen shows
+
+        public void ServerOwePick() { m_PicksOwed++; }
+
+        public void ServerResetCores()
+        {
+            ServerState.cores = 0; m_Offer = null; m_PicksOwed = 0;
+            m_Hp = (byte)Mathf.Min(m_Hp, ServerMaxHp);
+            if (connectionToClient != null) TargetOffers(connectionToClient, 255, 255, 255, 0f);
+        }
+
+        void ServerCoreTick()
+        {
+            if (m_Offer != null && Time.time >= m_OfferUntil) { ServerPickCore(s_CoreRng.Next(m_Offer.Length)); return; }
+            if (m_Offer == null && m_PicksOwed > 0 && SpikeMatch.I != null && SpikeMatch.I.winner == -2) ServerMakeOffer();
+            if (m_Hp > 0 && m_Hp < ServerMaxHp && SpikeCores.Mods(ServerState.cores).regenPerSecond > 0f && Time.time - m_LastDamagedAt > 4f)
+            {
+                m_RegenAcc += SpikeCores.Mods(ServerState.cores).regenPerSecond * SpikeSim.Dt;     // Repair Nanites
+                int whole = (int)m_RegenAcc;
+                if (whole > 0) { m_RegenAcc -= whole; m_Hp = (byte)Mathf.Min(ServerMaxHp, m_Hp + whole); }
+            }
+        }
+
+        void ServerMakeOffer()
+        {
+            var pool = new List<int>();
+            for (int i = 0; i < SpikeCores.Count; i++) if (!SpikeCores.Has(ServerState.cores, i)) pool.Add(i);
+            if (pool.Count == 0) { m_PicksOwed = 0; return; }
+            for (int i = pool.Count - 1; i > 0; i--) { int j = s_CoreRng.Next(i + 1); int t = pool[i]; pool[i] = pool[j]; pool[j] = t; }
+            m_Offer = pool.GetRange(0, Mathf.Min(3, pool.Count)).ToArray();
+            m_OfferUntil = Time.time + SpikeCores.OfferSeconds;
+            if (connectionToClient != null) TargetOffers(connectionToClient, (byte)m_Offer[0], (byte)(m_Offer.Length > 1 ? m_Offer[1] : 255), (byte)(m_Offer.Length > 2 ? m_Offer[2] : 255), SpikeCores.OfferSeconds);
+        }
+
+        void ServerPickCore(int index)
+        {
+            if (m_Offer == null || index < 0 || index >= m_Offer.Length) return;
+            int core = m_Offer[index];
+            int before = ServerMaxHp;
+            ServerState.cores |= (ushort)(1 << core);
+            int gained = ServerMaxHp - before;
+            m_Hp = (byte)Mathf.Clamp(m_Hp + Mathf.Max(0, gained), 1, ServerMaxHp);       // Heavy Plating also fills the new hit points, Glass Cannon only lowers the cap
+            m_Offer = null; m_PicksOwed = Mathf.Max(0, m_PicksOwed - 1);
+            if (connectionToClient != null) TargetOffers(connectionToClient, 255, 255, 255, 0f);
+        }
+
+        [Command]
+        void CmdPickCore(int index) { ServerPickCore(index); }
+
+        [TargetRpc]
+        void TargetOffers(NetworkConnectionToClient target, byte a, byte b, byte c, float seconds)
+        {
+            if (a == 255) { HudOffers = null; return; }
+            var list = new List<int> { a };
+            if (b != 255) list.Add(b);
+            if (c != 255) list.Add(c);
+            HudOffers = list.ToArray(); HudOfferUntil = Time.time + seconds;
+            if (botMode) PickCore(0);
+        }
+
+        /// <summary>Local player chooses one of the offered cores (index into the offer list).</summary>
+        public void PickCore(int index)
+        {
+            if (!isLocalPlayer || HudOffers == null || index < 0 || index >= HudOffers.Length) return;
+            HudOffers = null;
+            CmdPickCore(index);
+        }
+
         void ServerRespawn()
         {
             ServerDead = false;
-            m_Hp = SpikeSim.MaxHp; m_Shield = 0f; m_ShieldTime = 0f; m_DmgTime = 0f;
-            ServerState = new TankState { pos = SpikeServer.I.PickSpawn(this) };
+            ushort keep = ServerState.cores;
+            ServerState = new TankState { pos = SpikeServer.I.PickSpawn(this), cores = keep };
+            m_Hp = (byte)ServerMaxHp; m_Shield = 0f; m_ShieldTime = 0f; m_DmgTime = 0f;
             ServerState.yaw = ServerState.turretYaw = Mathf.Atan2(-ServerState.pos.x, -ServerState.pos.z) * Mathf.Rad2Deg;
             m_Epoch++;
         }
@@ -188,7 +287,7 @@ namespace TankGame.NetSpike
             RpcSnapshot(new Snap
             {
                 serverTick = tick, ackSeq = m_Ack, x = ServerState.pos.x, z = ServerState.pos.z, speed = ServerState.speed, fireCd = ServerState.fireCd,
-                dashTime = ServerState.dashTime, dashCd = ServerState.dashCd, dashYaw = ServerState.dashYaw, speedTime = ServerState.speedTime, weapon = ServerState.weapon, ammo = ServerState.ammo,
+                dashTime = ServerState.dashTime, dashCd = ServerState.dashCd, dashYaw = ServerState.dashYaw, speedTime = ServerState.speedTime, weapon = ServerState.weapon, ammo = ServerState.ammo, cores = ServerState.cores,
                 yaw = (ushort)Mathf.Clamp(Mathf.RoundToInt(Mathf.Repeat(ServerState.yaw, 360f) / 360f * 65536f), 0, 65535),
                 turret = (ushort)Mathf.Clamp(Mathf.RoundToInt(Mathf.Repeat(ServerState.turretYaw, 360f) / 360f * 65536f), 0, 65535),
                 hp = m_Hp, shield = (byte)Mathf.CeilToInt(m_Shield), flags = (byte)((ServerDead ? 1 : 0) | (m_DmgTime > 0f ? 2 : 0)), epoch = m_Epoch,
@@ -202,7 +301,7 @@ namespace TankGame.NetSpike
             if (s.serverTick > LatestServerTick) LatestServerTick = s.serverTick;
             m_ClientDead = (s.flags & 1) != 0;
             if (hpText != null) hpText.text = m_ClientDead ? "DEAD" : s.hp + (s.shield > 0 ? " +" + s.shield : "") + ((s.flags & 2) != 0 ? " x1.5" : "") + (s.weapon != 0 ? "\n" + SpikeSim.Weapons[s.weapon].name + " " + s.ammo : "");
-            if (isLocalPlayer) { HudHp = s.hp; HudShield = s.shield; HudDmg = (s.flags & 2) != 0; HudSpeedTime = s.speedTime; HudDashCd = s.dashCd; HudWeapon = s.weapon; HudAmmo = s.ammo; }
+            if (isLocalPlayer) { HudHp = s.hp; HudShield = s.shield; HudDmg = (s.flags & 2) != 0; HudSpeedTime = s.speedTime; HudDashCd = s.dashCd; HudWeapon = s.weapon; HudAmmo = s.ammo; HudCores = s.cores; }
             if (isLocalPlayer) Reconcile(s); else AddRemote(s);
         }
 
@@ -372,7 +471,7 @@ namespace TankGame.NetSpike
 
         static TankState FromSnap(Snap s)
         {
-            return new TankState { pos = new Vector3(s.x, 0f, s.z), yaw = s.yaw * (360f / 65536f), turretYaw = s.turret * (360f / 65536f), speed = s.speed, fireCd = s.fireCd, dashTime = s.dashTime, dashCd = s.dashCd, dashYaw = s.dashYaw, speedTime = s.speedTime, weapon = s.weapon, ammo = s.ammo };
+            return new TankState { pos = new Vector3(s.x, 0f, s.z), yaw = s.yaw * (360f / 65536f), turretYaw = s.turret * (360f / 65536f), speed = s.speed, fireCd = s.fireCd, dashTime = s.dashTime, dashCd = s.dashCd, dashYaw = s.dashYaw, speedTime = s.speedTime, weapon = s.weapon, ammo = s.ammo, cores = s.cores };
         }
 
         void AddRemote(Snap s)
@@ -543,14 +642,16 @@ namespace TankGame.NetSpike
         [ClientRpc(channel = Channels.Reliable)]
         void RpcExplodeFx(Vector3 pos) { if (Fx != null) Fx.SpawnExplosion(pos); }
 
-        static readonly Color[] ShellColors = { new Color(1f, 0.92f, 0.5f), new Color(1f, 1f, 0.75f), new Color(1f, 0.6f, 0.2f), new Color(1f, 0.35f, 0.15f) };
-        static readonly Vector3[] ShellScale = { Vector3.one, new Vector3(0.5f, 0.5f, 0.8f), new Vector3(0.6f, 0.6f, 0.5f), new Vector3(1.9f, 1.9f, 2.4f) };
+        static readonly Color[] ShellColors = { new Color(1f, 0.92f, 0.5f), new Color(1f, 1f, 0.75f), new Color(1f, 0.6f, 0.2f), new Color(1f, 0.35f, 0.15f), new Color(0.5f, 0.85f, 1f), new Color(0.6f, 0.9f, 0.3f) };
+        static readonly Vector3[] ShellScale = { Vector3.one, new Vector3(0.5f, 0.5f, 0.8f), new Vector3(0.6f, 0.6f, 0.5f), new Vector3(1.9f, 1.9f, 2.4f), new Vector3(0.45f, 0.45f, 3.2f), Vector3.one };
 
         void SpawnShell(Vector3 origin, Vector3 dir, float dist, byte weapon)
         {
             if (Application.isBatchMode) return;                 // headless test clients draw nothing
             GameObject go;
-            if (shellPrefab != null)
+            GameObject own = shellOverrides != null && weapon < shellOverrides.Length ? shellOverrides[weapon] : null;
+            if (own != null) go = Instantiate(own, origin, Quaternion.LookRotation(dir));          // pack visual: used as authored, no tint or rescale
+            else if (shellPrefab != null)
             {
                 go = Instantiate(shellPrefab, origin, Quaternion.LookRotation(dir));
                 var mr = go.GetComponentInChildren<MeshRenderer>();

@@ -1,0 +1,25 @@
+{
+    "name": "Tank.Net",
+    "rootNamespace": "Tank.Net",
+    "references": [
+        "Tank.Core",
+        "Tank.Gameplay",
+        "Mirror",
+        "Mirror.Transports",
+        "Reflex",
+        "UniTask",
+        "Unity.InputSystem",
+        "Unity.TextMeshPro",
+        "UnityEngine.UI",
+        "Mirror.Components"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": false,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

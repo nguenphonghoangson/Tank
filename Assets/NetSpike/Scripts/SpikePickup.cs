@@ -9,12 +9,12 @@ namespace TankGame.NetSpike
     /// </summary>
     public sealed class SpikePickup : NetworkBehaviour
     {
-        public enum Kind : byte { None = 0, Repair = 1, Shield = 2, Speed = 3, Damage = 4, MachineGun = 5, Shotgun = 6, Rocket = 7 }
+        public enum Kind : byte { None = 0, Repair = 1, Shield = 2, Speed = 3, Damage = 4, MachineGun = 5, Shotgun = 6, Rocket = 7, Gigavolt = 8, Grenade = 9 }
         public const float Radius = 2.2f;
-        static readonly string[] Labels = { "", "REPAIR", "SHIELD", "SPEED", "DAMAGE x1.5", "MACHINE GUN", "SHOTGUN", "ROCKET" };
-        static readonly Color[] Colors = { Color.clear, new Color(0.35f, 1f, 0.5f), new Color(0.3f, 0.85f, 1f), new Color(1f, 0.9f, 0.25f), new Color(1f, 0.3f, 0.25f), new Color(1f, 0.65f, 0.15f), new Color(0.95f, 0.35f, 0.9f), new Color(0.7f, 0.5f, 1f) };
-        static readonly float[] Weights = { 0f, 3f, 2f, 2f, 1.5f, 1.5f, 1.5f, 1f };
-        static readonly float[] Respawn = { 0f, 25f, 30f, 30f, 40f, 35f, 35f, 45f };
+        static readonly string[] Labels = { "", "REPAIR", "SHIELD", "SPEED", "DAMAGE x1.5", "MACHINE GUN", "SHOTGUN", "ROCKET", "GIGAVOLT", "GRENADE" };
+        static readonly Color[] Colors = { Color.clear, new Color(0.35f, 1f, 0.5f), new Color(0.3f, 0.85f, 1f), new Color(1f, 0.9f, 0.25f), new Color(1f, 0.3f, 0.25f), new Color(1f, 0.65f, 0.15f), new Color(0.95f, 0.35f, 0.9f), new Color(0.7f, 0.5f, 1f), new Color(0.4f, 0.8f, 1f), new Color(0.6f, 0.9f, 0.3f) };
+        static readonly float[] Weights = { 0f, 3f, 2f, 2f, 1.5f, 1.5f, 1.5f, 1f, 1f, 1f };
+        static readonly float[] Respawn = { 0f, 25f, 30f, 30f, 40f, 35f, 35f, 45f, 40f, 40f };
 
         [SyncVar(hook = nameof(OnVariant))] public byte variant;
         public GameObject[] variantRoots;     // indexed by variant (the prototype's own item models, one child per kind)

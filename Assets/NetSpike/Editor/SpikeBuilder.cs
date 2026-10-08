@@ -35,7 +35,8 @@ namespace TankGame.NetSpike.Editor
             Material barrelMat = Lit("Barrel", new Color(0.85f, 0.87f, 0.9f));
             Material shell = Unlit("Shell", new Color(1f, 0.9f, 0.45f));
             GameObject shellPrefab = useMap ? BuildShellPrefab() : null;
-            GameObject prefab = useMap ? BuildProtoTankPrefab(shell, shellPrefab) : BuildTankPrefab(hull, turretMat, barrelMat, shell);
+            GameObject[] shellOverrides = useMap ? new[] { BuildPackShell("shot_default_visual"), BuildPackShell("shot_minigun_visual"), null, null, null, BuildPackShell("shot_grenade_visual") } : null;
+            GameObject prefab = useMap ? BuildProtoTankPrefab(shell, shellPrefab, shellOverrides) : BuildTankPrefab(hull, turretMat, barrelMat, shell);
             GameObject pickupPrefab = null;     // built from the map's own item slot, in BuildMap
 
             Scene scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Additive);
@@ -55,7 +56,7 @@ namespace TankGame.NetSpike.Editor
 
             Vector3[] mapSpawns = null, mapPickups = null;
             Vector4[] mapBlocks = null;
-            if (useMap) BuildMap(out mapSpawns, out mapPickups, out pickupPrefab, out mapBlocks);
+            if (useMap) BuildArenaMap(out mapSpawns, out mapPickups, out pickupPrefab, out mapBlocks);
             else
             {
                 // arena: 60 x 60 with walls and a few covers (same scene on server and clients, so the simulation sees the same world)
@@ -107,37 +108,132 @@ namespace TankGame.NetSpike.Editor
             Debug.Log("Net spike built: " + path);
         }
 
-        /// <summary>The Crossfire map as geometry only: gameplay components are removed (flags, item slots and layout are replaced by the spike's own versions).</summary>
-        static void BuildMap(out Vector3[] spawns, out Vector3[] pickups, out GameObject pickupPrefab, out Vector4[] blocks)
+        const string ModelDir = "Assets/Models/";
+        const float OvalA = 27f * MapScale, OvalB = 18.1f * MapScale;      // barrier_oval01 wall centre line (semi-axes); the play area is just inside it
+        const float TankScale = 1.8f;                // the pack tank (hull 1.4 x 1.6 m) is drawn at this scale to match the simulation's footprint
+        const float MapScale = 2f;                   // the pack's arena is sized for its own small tank; ours is about twice that, so the arena grows with it
+        const float CoverScale = 1.5f;
+        const float FlagRadius = 9f;
+
+        /// <summary>
+        /// The laser arena from the new pack: platform as ground, oval rim as the visual wall, and every collision shape built here as plain boxes
+        /// (a ring around the oval, one per cover) because the simulation's ComputePenetration cannot use a concave MeshCollider.
+        /// Flags and the item model are taken from the old Crossfire prefab (their visuals are reused, positions are new); its geometry is dropped.
+        /// </summary>
+        static void BuildArenaMap(out Vector3[] spawns, out Vector3[] pickups, out GameObject pickupPrefab, out Vector4[] blocks)
         {
             var src = AssetDatabase.LoadAssetAtPath<GameObject>(MapPrefabPath);
-            var map = (GameObject)PrefabUtility.InstantiatePrefab(src);
-            PrefabUtility.UnpackPrefabInstance(map, PrefabUnpackMode.Completely, InteractionMode.AutomatedAction);
+            var old = (GameObject)PrefabUtility.InstantiatePrefab(src);
+            PrefabUtility.UnpackPrefabInstance(old, PrefabUnpackMode.Completely, InteractionMode.AutomatedAction);
+            pickupPrefab = BuildPickupPrefab(old.transform.Find("Pickups").GetChild(0).gameObject);
 
-            Component layout = map.GetComponent("MapLayout");
-            var so = new SerializedObject(layout);
-            var spawnList = new System.Collections.Generic.List<Vector3>();
-            SerializedProperty groups = so.FindProperty("spawnGroups");
-            for (int g = 0; g < groups.arraySize; g++)
+            var map = new GameObject("Map_LaserArena").transform;
+            var flags = new GameObject("Flags").transform;
+            flags.SetParent(map, false);
+            Vector3[] flagPos = { new Vector3(-32f, 0f, 0f), new Vector3(0f, 0f, 0f), new Vector3(32f, 0f, 0f) };
+            string[] flagKey = { "Point_A", "Point_B", "Point_C" };
+            for (int i = 0; i < flagKey.Length; i++)
             {
-                SerializedProperty pts = groups.GetArrayElementAtIndex(g).FindPropertyRelative("points");
-                for (int i = 0; i < pts.arraySize; i++) spawnList.Add(((Transform)pts.GetArrayElementAtIndex(i).objectReferenceValue).position);
+                Transform f = old.transform.Find("ControlPoints/" + flagKey[i]);
+                f.SetParent(flags, false);
+                f.position = flagPos[i];
+                f.localScale *= FlagRadius / 8f;                        // the old visuals were sized for radius 8
+                f.GetComponent<TankGame.Prototype.ControlPoint>().radius = FlagRadius;
             }
-            var pickupList = new System.Collections.Generic.List<Vector3>();
-            SerializedProperty slots = so.FindProperty("pickups");
-            for (int i = 0; i < slots.arraySize; i++) pickupList.Add(((Component)slots.GetArrayElementAtIndex(i).objectReferenceValue).transform.position);
-            spawns = spawnList.ToArray(); pickups = pickupList.ToArray();
+            foreach (MonoBehaviour mb in old.GetComponentsInChildren<MonoBehaviour>(true)) if (mb != null && mb.GetType().Name != "ControlPoint") Object.DestroyImmediate(mb);
+            Object.DestroyImmediate(old);
+
+            var geo = new GameObject("Geometry").transform;
+            geo.SetParent(map, false);
+            Visual(ModelDir + "laser_arenaplatform_combined.fbx", "platform01_combined", "Platform", geo, new Vector3(1.1f, 0f, -0.2f) * MapScale, "Assets/Materials/Special/mg_LaserGround.mat").transform.localScale = Vector3.one * MapScale;   // top face at y 0, centred on the oval
+            Visual(ModelDir + "barrieroval01.fbx", "barrier_oval01", "Rim", geo, Vector3.zero, "Assets/Materials/FX/mfx_forceField.mat").transform.localScale = Vector3.one * MapScale;
+
+            // lava far below the platform, as in the pack's own levels (visual only)
+            var lava = GameObject.CreatePrimitive(PrimitiveType.Quad);
+            Object.DestroyImmediate(lava.GetComponent<Collider>());
+            lava.name = "Lava";
+            lava.transform.SetParent(geo, false);
+            lava.transform.SetPositionAndRotation(new Vector3(0f, -4.2f, 0f), Quaternion.Euler(90f, 0f, 0f));
+            lava.transform.localScale = new Vector3(280f, 280f, 1f);
+            lava.GetComponent<MeshRenderer>().sharedMaterial = AssetDatabase.LoadAssetAtPath<Material>("Assets/Materials/FX/mfx_LaserLava.mat");
+
+            // wall: a ring of boxes along the oval
+            const int N = 48;
+            var wall = new GameObject("Wall").transform;
+            wall.SetParent(geo, false);
+            for (int i = 0; i < N; i++)
+            {
+                float t0 = i * Mathf.PI * 2f / N, t1 = (i + 1) * Mathf.PI * 2f / N;
+                Vector3 p0 = new Vector3(OvalA * Mathf.Cos(t0), 0f, OvalB * Mathf.Sin(t0)), p1 = new Vector3(OvalA * Mathf.Cos(t1), 0f, OvalB * Mathf.Sin(t1));
+                var seg = new GameObject("Wall_" + i);
+                seg.transform.SetParent(wall, false);
+                seg.transform.position = (p0 + p1) * 0.5f + Vector3.up * 2f;
+                seg.transform.rotation = Quaternion.LookRotation((p1 - p0).normalized);
+                var bc = seg.AddComponent<BoxCollider>();
+                bc.size = new Vector3(2.4f, 4f, (p1 - p0).magnitude * 1.15f);
+            }
+
+            // cover: (model, x, z, yaw), mirrored left/right and front/back so neither side is favoured
+            var cover = new GameObject("Cover").transform;
+            cover.SetParent(geo, false);
             var blockList = new System.Collections.Generic.List<Vector4>();
-            Transform geo = map.transform.Find("Geometry");
-            if (geo != null) foreach (Transform c in geo) if (c.name.StartsWith("Cover_")) blockList.Add(new Vector4(c.position.x, c.position.z, c.lossyScale.x, c.lossyScale.z));
+            var defs = new[]
+            {
+                new CoverDef("lava_rock01", 8f, 6f, 20f), new CoverDef("lava_rock01", -8f, -6f, 20f), new CoverDef("lava_rock01", 8f, -6f, -20f), new CoverDef("lava_rock01", -8f, 6f, -20f),
+                new CoverDef("lava_rock04", 16f, 10f, 0f), new CoverDef("lava_rock04", -16f, -10f, 0f), new CoverDef("lava_rock04", 16f, -10f, 90f), new CoverDef("lava_rock04", -16f, 10f, 90f),
+                new CoverDef("lava_pillar01", 3f, 8f, 0f), new CoverDef("lava_pillar02", -3f, 8f, 0f), new CoverDef("lava_pillar01", -3f, -8f, 0f), new CoverDef("lava_pillar02", 3f, -8f, 0f),
+            };
+            for (int i = 0; i < defs.Length; i++)
+            {
+                GameObject c = Visual(ModelDir + "laser_blockers.fbx", defs[i].model, "Cover_" + i, cover, new Vector3(defs[i].x, 0f, defs[i].z) * MapScale);
+                c.transform.rotation = Quaternion.Euler(0f, defs[i].yaw, 0f);
+                c.transform.localScale = Vector3.one * CoverScale;
+                var mf = c.GetComponent<MeshFilter>();
+                var bc = c.AddComponent<BoxCollider>();
+                bc.center = mf.sharedMesh.bounds.center; bc.size = mf.sharedMesh.bounds.size;
+                Bounds wb = c.GetComponent<Renderer>().bounds;
+                blockList.Add(new Vector4(wb.center.x, wb.center.z, wb.size.x, wb.size.z));
+            }
             blocks = blockList.ToArray();
 
-            // the item slot's own models become the networked item prefab; then strip gameplay scripts (flags keep ControlPoint for their visuals only)
-            Transform slotsRoot = map.transform.Find("Pickups");
-            pickupPrefab = BuildPickupPrefab(slotsRoot.GetChild(0).gameObject);
-            Object.DestroyImmediate(slotsRoot.gameObject);
-            foreach (MonoBehaviour mb in map.GetComponentsInChildren<MonoBehaviour>(true)) if (mb != null && mb.GetType().Name != "ControlPoint") Object.DestroyImmediate(mb);
-            Debug.Log("Map imported: " + spawns.Length + " spawn points, " + pickups.Length + " item slots");
+            spawns = new[]
+            {
+                new Vector3(-21f, 0f, -6f), new Vector3(-21f, 0f, 6f), new Vector3(21f, 0f, -6f), new Vector3(21f, 0f, 6f),
+                new Vector3(-6f, 0f, -14f), new Vector3(6f, 0f, -14f), new Vector3(-6f, 0f, 14f), new Vector3(6f, 0f, 14f),
+            };
+            pickups = new[]
+            {
+                new Vector3(-8f, 0f, -11f), new Vector3(8f, 0f, 11f), new Vector3(8f, 0f, -11f), new Vector3(-8f, 0f, 11f),
+                new Vector3(-23f, 0f, 0f), new Vector3(23f, 0f, 0f), new Vector3(0f, 0f, -13f), new Vector3(0f, 0f, 13f),
+            };
+            for (int i = 0; i < spawns.Length; i++) spawns[i] *= MapScale;
+            for (int i = 0; i < pickups.Length; i++) pickups[i] *= MapScale;
+            Debug.Log("Laser arena built: " + spawns.Length + " spawn points, " + pickups.Length + " item slots, " + defs.Length + " cover blocks, " + flagKey.Length + " flags");
+        }
+
+        struct CoverDef
+        {
+            public string model; public float x, z, yaw;
+            public CoverDef(string model, float x, float z, float yaw) { this.model = model; this.x = x; this.z = z; this.yaw = yaw; }
+        }
+
+        /// <summary>One named mesh of a pack model, instanced as its own object (no collider, no scripts).</summary>
+        static GameObject Visual(string fbxPath, string childName, string name, Transform parent, Vector3 pos, string materialPath = "Assets/Materials/Palettes/mp_LaserTheme.mat")
+        {
+            var fbx = AssetDatabase.LoadAssetAtPath<GameObject>(fbxPath);
+            Transform part = null;
+            foreach (Transform t in fbx.GetComponentsInChildren<Transform>(true)) if (t.name == childName) { part = t; break; }
+            if (part == null) throw new System.Exception(fbxPath + " has no child " + childName);
+            var go = new GameObject(name);
+            go.transform.SetParent(parent, false);
+            go.transform.position = pos;
+            go.AddComponent<MeshFilter>().sharedMesh = part.GetComponent<MeshFilter>().sharedMesh;
+            var mr = go.AddComponent<MeshRenderer>();
+            mr.sharedMaterials = part.GetComponent<MeshRenderer>().sharedMaterials;
+            // the pack's FBX carry their own placeholder materials ("pal", "mat1"); the project's materials are what they were authored for (palette for props, ground for the platform, force field for the rim, as in the pack's own levels)
+            var theme = AssetDatabase.LoadAssetAtPath<Material>(materialPath);
+            if (theme != null) { var mats = new Material[mr.sharedMaterials.Length]; for (int i = 0; i < mats.Length; i++) mats[i] = theme; mr.sharedMaterials = mats; }
+            return go;
         }
 
         /// <summary>The prototype's item slot (all seven item models as children) turned into a networked item.</summary>
@@ -150,7 +246,11 @@ namespace TankGame.NetSpike.Editor
             foreach (Collider c in root.GetComponentsInChildren<Collider>(true)) Object.DestroyImmediate(c);
             root.AddComponent<NetworkIdentity>();
             var pk = root.AddComponent<SpikePickup>();
-            string[] keys = { null, "Variant_Repair_", "Variant_Shield_", "Variant_Speed_", "Variant_Damage_", "Variant_Weapon_MACHINE_GUN", "Variant_Weapon_SHOTGUN", "Variant_Weapon_ROCKET" };
+            string[] keys = { null, "Variant_Repair_", "Variant_Shield_", "Variant_Speed_", "Variant_Damage_", "Variant_Weapon_MACHINE_GUN", "Variant_Weapon_SHOTGUN", "Variant_Weapon_ROCKET", "Variant_Weapon_GIGAVOLT", "Variant_Weapon_GRENADE" };
+            Transform rocketVariant = null;
+            foreach (Transform child in root.transform) if (child.name.StartsWith("Variant_Weapon_ROCKET")) rocketVariant = child;
+            AddIconVariant(root.transform, rocketVariant, "Variant_Weapon_GIGAVOLT", "ye_lightningbeam");
+            AddIconVariant(root.transform, rocketVariant, "Variant_Weapon_GRENADE", "grenade");
             pk.variantRoots = new GameObject[keys.Length];
             foreach (Transform child in root.transform)
             {
@@ -174,6 +274,36 @@ namespace TankGame.NetSpike.Editor
             return prefab;
         }
 
+        /// <summary>A new item kind: the rocket variant's base, label and bobbing rig, with its icon swapped for a model from the weapon pack.</summary>
+        static void AddIconVariant(Transform itemRoot, Transform template, string name, string iconMesh)
+        {
+            var v = Object.Instantiate(template.gameObject, itemRoot);
+            v.name = name;
+            Transform vis = v.transform.Find("Visual");
+            for (int i = vis.childCount - 1; i >= 0; i--) Object.DestroyImmediate(vis.GetChild(i).gameObject);
+            foreach (Component c in vis.GetComponents<Component>()) if (c is MeshRenderer || c is MeshFilter) Object.DestroyImmediate(c);
+            GameObject icon = Visual(ModelDir + "Weapons/powerup_icons.fbx", iconMesh, "Icon", vis, Vector3.zero, "Assets/Materials/Palettes/mpe_PowerupIcons.mat");
+            icon.transform.localPosition = Vector3.zero;
+            icon.transform.localScale = Vector3.one * 2.2f;
+        }
+
+        /// <summary>One of the weapon pack's shot visuals (mesh, particles) with its own scripts removed: SpikeShell moves it.</summary>
+        static GameObject BuildPackShell(string shotPrefabName)
+        {
+            var src = AssetDatabase.LoadAssetAtPath<GameObject>("Assets/Prefabs/Shots/" + shotPrefabName + ".prefab");
+            var go = (GameObject)PrefabUtility.InstantiatePrefab(src);
+            PrefabUtility.UnpackPrefabInstance(go, PrefabUnpackMode.Completely, InteractionMode.AutomatedAction);
+            go.name = "Shell_" + shotPrefabName;
+            GameObjectUtility.RemoveMonoBehavioursWithMissingScript(go);
+            foreach (Transform t in go.GetComponentsInChildren<Transform>(true)) GameObjectUtility.RemoveMonoBehavioursWithMissingScript(t.gameObject);
+            foreach (MonoBehaviour mb in go.GetComponentsInChildren<MonoBehaviour>(true)) if (mb != null) Object.DestroyImmediate(mb);
+            foreach (Collider c in go.GetComponentsInChildren<Collider>(true)) Object.DestroyImmediate(c);
+            foreach (Rigidbody rb in go.GetComponentsInChildren<Rigidbody>(true)) Object.DestroyImmediate(rb);
+            var prefab = PrefabUtility.SaveAsPrefabAsset(go, Root + "/Prefabs/Shell_" + shotPrefabName + ".prefab");
+            Object.DestroyImmediate(go);
+            return prefab;
+        }
+
         /// <summary>The prototype's projectile look (mesh and trail) without its flight and hit script.</summary>
         static GameObject BuildShellPrefab()
         {
@@ -189,7 +319,7 @@ namespace TankGame.NetSpike.Editor
         }
 
         /// <summary>The prototype's tank model (hull, tracks, turret, team ring) with all gameplay components removed.</summary>
-        static GameObject BuildProtoTankPrefab(Material shell, GameObject shellPrefab)
+        static GameObject BuildProtoTankPrefab(Material shell, GameObject shellPrefab, GameObject[] shellOverrides)
         {
             var src = AssetDatabase.LoadAssetAtPath<GameObject>("Assets/Prototype/Prefabs/Tank_Match.prefab");
             var root = (GameObject)PrefabUtility.InstantiatePrefab(src);
@@ -197,6 +327,26 @@ namespace TankGame.NetSpike.Editor
             root.name = "SpikeTank";
             Transform bar = root.transform.Find("HealthBar");
             if (bar != null) Object.DestroyImmediate(bar.gameObject);
+
+            // the prototype's boxes (hull, tracks, turret, barrel) give way to the weapon pack's tank; only the team ring stays
+            Transform vis = root.transform.Find("Visual");
+            foreach (string part in new[] { "Hull", "TrackL", "TrackR", "TurretPivot" }) Object.DestroyImmediate(vis.Find(part).gameObject);
+            vis.localScale = Vector3.one * TankScale;
+            Transform ringT = vis.Find("TeamRing");
+            ringT.localScale = new Vector3(4.6f / TankScale, 4.6f / TankScale, 1f); ringT.localPosition = new Vector3(0f, 0.05f / TankScale, 0f);
+            var pack = (GameObject)PrefabUtility.InstantiatePrefab(AssetDatabase.LoadAssetAtPath<GameObject>("Assets/Prefabs/Game/PlayerTank.prefab"));
+            PrefabUtility.UnpackPrefabInstance(pack, PrefabUnpackMode.Completely, InteractionMode.AutomatedAction);
+            Transform hullGroup = pack.transform.Find("TankParent");
+            hullGroup.SetParent(vis, false);
+            Transform packTurret = hullGroup.Find("visual_turret");
+            var weapon = (GameObject)PrefabUtility.InstantiatePrefab(AssetDatabase.LoadAssetAtPath<GameObject>("Assets/Prefabs/Weapons/weapon_primary_main.prefab"));
+            PrefabUtility.UnpackPrefabInstance(weapon, PrefabUnpackMode.Completely, InteractionMode.AutomatedAction);
+            Object.DestroyImmediate(weapon.transform.Find("Exits").gameObject);
+            weapon.transform.SetParent(packTurret.Find("PrimaryWeapons"), false);
+            weapon.transform.localPosition = Vector3.zero; weapon.transform.localRotation = Quaternion.identity;
+            Object.DestroyImmediate(pack);                                         // teleport / damage effects and the other weapons are not used
+            foreach (Animator an in root.GetComponentsInChildren<Animator>(true)) Object.DestroyImmediate(an);
+            foreach (Transform t in root.GetComponentsInChildren<Transform>(true)) GameObjectUtility.RemoveMonoBehavioursWithMissingScript(t.gameObject);   // scripts of the pack that this project does not have
             foreach (MonoBehaviour mb in root.GetComponentsInChildren<MonoBehaviour>(true)) if (mb != null && mb.GetType().Name != "TankUnit") Object.DestroyImmediate(mb);
             foreach (MonoBehaviour mb in root.GetComponentsInChildren<MonoBehaviour>(true)) if (mb != null) Object.DestroyImmediate(mb);
             foreach (Rigidbody rb in root.GetComponentsInChildren<Rigidbody>(true)) Object.DestroyImmediate(rb);
@@ -204,8 +354,8 @@ namespace TankGame.NetSpike.Editor
 
             root.AddComponent<NetworkIdentity>();
             var tank = root.AddComponent<SpikeTank>();
-            tank.visual = root.transform.Find("Visual");
-            tank.turret = root.transform.Find("Visual/TurretPivot");
+            tank.visual = vis;
+            tank.turret = packTurret;
 
             var hp = new GameObject("HpText");
             hp.transform.SetParent(root.transform, false);
@@ -219,6 +369,7 @@ namespace TankGame.NetSpike.Editor
             tank.hpText = tm;
             tank.shellMaterial = shell;
             tank.shellPrefab = shellPrefab;
+            tank.shellOverrides = shellOverrides;
 
             var prefab = PrefabUtility.SaveAsPrefabAsset(root, Root + "/Prefabs/SpikeTank.prefab");
             Object.DestroyImmediate(root);

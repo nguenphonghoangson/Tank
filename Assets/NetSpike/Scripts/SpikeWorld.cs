@@ -8,7 +8,7 @@ namespace TankGame.NetSpike
         static SpikeWorld s_I;
         static readonly Collider[] s_Buf = new Collider[16];
         const int Mask = ~(1 << 2);                 // everything except "Ignore Raycast", where the probe lives
-        static readonly Vector3 Half = new Vector3(1.05f, 0.6f, 1.65f);
+        static readonly Vector3 Half = new Vector3(SpikeSim.BoxHalfX, 0.6f, SpikeSim.BoxHalfZ);
 
         BoxCollider m_Probe;
 

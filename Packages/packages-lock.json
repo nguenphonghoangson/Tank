@@ -17,6 +17,20 @@
       },
       "hash": "aa5fc638d623f56178d50329d9ad8c541a57fe66"
     },
+    "com.cysharp.unitask": {
+      "version": "https://github.com/Cysharp/UniTask.git?path=src/UniTask/Assets/Plugins/UniTask#2.5.11",
+      "depth": 0,
+      "source": "git",
+      "dependencies": {},
+      "hash": "2e993ff18f28c931602a07292df0b0804eebef99"
+    },
+    "com.gustavopsantos.reflex": {
+      "version": "https://github.com/gustavopsantos/Reflex.git?path=/Assets/Reflex/#14.3.1",
+      "depth": 0,
+      "source": "git",
+      "dependencies": {},
+      "hash": "55423389e8d443f18090720891af52d9952d6e5e"
+    },
     "com.unity.ai.inference": {
       "version": "2.6.1",
       "depth": 0,
@@ -35,6 +49,15 @@
       "depth": 1,
       "source": "builtin",
       "dependencies": {}
+    },
+    "com.unity.cinemachine": {
+      "version": "6.6.0",
+      "depth": 0,
+      "source": "builtin",
+      "dependencies": {
+        "com.unity.splines": "2.8.4",
+        "com.unity.modules.imgui": "1.0.0"
+      }
     },
     "com.unity.collections": {
       "version": "6.6.0",
@@ -116,6 +139,12 @@
         "com.unity.modules.uielements": "1.0.0"
       },
       "url": "https://packages.unity.com"
+    },
+    "com.unity.mathematics": {
+      "version": "1.4.0",
+      "depth": 2,
+      "source": "builtin",
+      "dependencies": {}
     },
     "com.unity.multiplayer.center": {
       "version": "2.0.1",
@@ -205,6 +234,17 @@
         "com.unity.searcher": "4.9.5",
         "com.unity.graph-authoring": "1.0.0"
       }
+    },
+    "com.unity.splines": {
+      "version": "2.9.1",
+      "depth": 1,
+      "source": "registry",
+      "dependencies": {
+        "com.unity.mathematics": "1.2.1",
+        "com.unity.modules.imgui": "1.0.0",
+        "com.unity.settings-manager": "1.0.3"
+      },
+      "url": "https://packages.unity.com"
     },
     "com.unity.test-framework": {
       "version": "1.8.0",

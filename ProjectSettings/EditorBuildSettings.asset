@@ -6,6 +6,9 @@ EditorBuildSettings:
   serializedVersion: 2
   m_Scenes:
   - enabled: 1
+    path: Assets/Scenes/Game_Arena.unity
+    guid: 7784bac9b34484c42a9d7223dd525be5
+  - enabled: 1
     path: Assets/Scenes/NetSpike_Match.unity
     guid: c38893bd0f0c84a13b7aa3e05f0055ff
   m_configObjects:

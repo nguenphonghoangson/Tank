@@ -1,0 +1,22 @@
+{
+    "name": "Tank.Gameplay",
+    "rootNamespace": "Tank.Gameplay",
+    "references": [
+        "Tank.Core",
+        "Reflex",
+        "UniTask",
+        "Unity.InputSystem",
+        "Unity.Cinemachine",
+        "Unity.TextMeshPro",
+        "UnityEngine.UI"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

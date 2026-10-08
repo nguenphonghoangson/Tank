@@ -1,0 +1,20 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: d237cde79bbf342879bff52d0f94cb7b, type: 3}
+  m_Name: misc_countdown
+  m_EditorClassIdentifier: Tank.Gameplay::Tank.Gameplay.Config.SfxCue
+  clips:
+  - {fileID: 8300000, guid: 1089425d86fddbe4d9f63f2de6b743a2, type: 3}
+  volume: 0.9
+  pitchBase: 1
+  pitchVariation: 0
+  mixerGroup: {fileID: 2672471945398431885, guid: 19d51d8e32ac4a54894d7622b5b3b01c, type: 2}

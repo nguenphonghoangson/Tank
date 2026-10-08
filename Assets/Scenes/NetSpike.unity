@@ -2123,6 +2123,10 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 47bc9461981264918bbf006d2135c51b, type: 3}
   m_Name: 
   m_EditorClassIdentifier: TankGame.NetSpike::TankGame.NetSpike.SpikeServer
+  pickupPrefab: {fileID: 0}
+  matchPrefab: {fileID: 0}
+  pickupPoints: []
+  pickupRespawnScale: 1
   spawnPoints:
   - {x: -22, y: 0, z: -22}
   - {x: 22, y: 0, z: 22}

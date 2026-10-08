@@ -70,3 +70,4 @@ MonoBehaviour:
   score1: 0
   timeLeft: 300
   winner: -2
+  winnerId: 0

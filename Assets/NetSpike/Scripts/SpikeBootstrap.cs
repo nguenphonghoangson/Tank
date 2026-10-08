@@ -1,6 +1,8 @@
 using System;
+using System.Collections.Generic;
 using Mirror;
 using UnityEngine;
+using UnityEngine.InputSystem;
 
 namespace TankGame.NetSpike
 {
@@ -176,10 +178,81 @@ namespace TankGame.NetSpike
                 Fill(new Rect(c.x - d * 0.5f, c.y - d * 0.5f, d, d), t == SpikeTank.Local ? Color.white : SpikeMatch.TeamColors[SpikeMatch.TeamOf(t.netId)]);
             }
 
+            DrawCores(k);
+
+            // Tab (or tap the clock) holds the K/D/A board; it stays up once the match is decided
+            bool tab = Keyboard.current != null && Keyboard.current.tabKey.isPressed;
+            if (Event.current.type == EventType.MouseDown && new Rect(cx - w * 0.5f, 4f * k, w, h).Contains(Event.current.mousePosition)) m_BoardOpen = !m_BoardOpen;
+            if (m.winner != -2 || tab || m_BoardOpen) DrawKdaBoard(m, k);
+
             if (m.winner != -2)
             {
                 m_Style.fontSize = Mathf.RoundToInt(30f * k); m_Style.normal.textColor = m.winner >= 0 ? SpikeMatch.TeamColors[m.winner] : Color.white;
-                GUI.Label(new Rect(0f, Screen.height * 0.35f, Screen.width, 50f * k), m.winner >= 0 ? SpikeMatch.TeamNames[m.winner] + " WINS" : "DRAW", m_Style);
+                string who = m.winnerId == (SpikeTank.Local != null ? SpikeTank.Local.netId : 0u) ? "YOU WIN" : "P" + m.winnerId + " WINS";
+                GUI.Label(new Rect(0f, Screen.height * 0.18f, Screen.width, 50f * k), m.winner >= 0 ? who + "  (highest KDA)" : "DRAW", m_Style);
+            }
+        }
+
+        void DrawCores(float k)
+        {
+            string owned = "";
+            for (int i = 0; i < SpikeCores.Count; i++) if (SpikeCores.Has(SpikeTank.HudCores, i)) owned += (owned.Length > 0 ? "  |  " : "") + TankGame.Prototype.CoreLibrary.All[i].name;
+            var st = new GUIStyle(GUI.skin.label) { fontSize = Mathf.RoundToInt(12f * k), alignment = TextAnchor.LowerLeft };
+            st.normal.textColor = new Color(1f, 1f, 1f, 0.85f);
+            if (owned.Length > 0) GUI.Label(new Rect(10f, Screen.height - 56f * k, Screen.width * 0.6f, 22f * k), "Cores: " + owned, st);
+
+            int[] offers = SpikeTank.HudOffers;
+            if (offers == null || SpikeTank.Local == null) return;
+            float cw = 190f * k, ch = 96f * k, gap = 12f * k, total = offers.Length * cw + (offers.Length - 1) * gap;
+            float x0 = Screen.width * 0.5f - total * 0.5f, y0 = Screen.height * 0.62f;
+            var head = new GUIStyle(st) { alignment = TextAnchor.MiddleCenter, fontSize = Mathf.RoundToInt(15f * k), fontStyle = FontStyle.Bold };
+            head.normal.textColor = Color.white;
+            float left = Mathf.Max(0f, SpikeTank.HudOfferUntil - Time.time);
+            GUI.Label(new Rect(x0, y0 - 30f * k, total, 24f * k), "Choose a core (" + Mathf.CeilToInt(left) + "s)  -  keys 1 / 2 / 3 or click", head);
+            var name = new GUIStyle(st) { alignment = TextAnchor.UpperCenter, fontStyle = FontStyle.Bold, fontSize = Mathf.RoundToInt(14f * k), wordWrap = true };
+            var desc = new GUIStyle(st) { alignment = TextAnchor.UpperCenter, fontSize = Mathf.RoundToInt(12f * k), wordWrap = true };
+            for (int i = 0; i < offers.Length; i++)
+            {
+                TankGame.Prototype.CoreDef core = TankGame.Prototype.CoreLibrary.All[offers[i]];
+                var r = new Rect(x0 + i * (cw + gap), y0, cw, ch);
+                Fill(new Rect(r.x - 2f, r.y - 2f, r.width + 4f, r.height + 4f), core.color);
+                Fill(r, new Color(0.06f, 0.08f, 0.12f, 0.95f));
+                name.normal.textColor = core.color; GUI.Label(new Rect(r.x + 6f * k, r.y + 6f * k, r.width - 12f * k, 24f * k), (i + 1) + "  " + core.name, name);
+                desc.normal.textColor = Color.white; GUI.Label(new Rect(r.x + 8f * k, r.y + 34f * k, r.width - 16f * k, r.height - 40f * k), core.description, desc);
+                bool clicked = Event.current.type == EventType.MouseDown && r.Contains(Event.current.mousePosition);
+                bool key = Keyboard.current != null && (i == 0 ? Keyboard.current.digit1Key : i == 1 ? Keyboard.current.digit2Key : Keyboard.current.digit3Key).wasPressedThisFrame;
+                if (clicked || key) { SpikeTank.Local.PickCore(i); return; }
+            }
+        }
+
+        bool m_BoardOpen;
+        readonly List<SpikeTank> m_Rank = new List<SpikeTank>();
+
+        void DrawKdaBoard(SpikeMatch m, float k)
+        {
+            m_Rank.Clear();
+            foreach (SpikeTank t in SpikeTank.All) if (t != null) m_Rank.Add(t);
+            m_Rank.Sort((a, b) =>
+            {
+                m.TryGetKda(a.netId, out KdaSync x); m.TryGetKda(b.netId, out KdaSync y);
+                int c = SpikeMatch.Ratio(y.k, y.d, y.a).CompareTo(SpikeMatch.Ratio(x.k, x.d, x.a));
+                return c != 0 ? c : y.k.CompareTo(x.k);
+            });
+            float rowH = 22f * k, w = Mathf.Min(Screen.width - 20f, 460f * k), x0 = Screen.width * 0.5f - w * 0.5f, y0 = Screen.height * 0.28f;
+            Fill(new Rect(x0, y0, w, rowH * (m_Rank.Count + 1) + 8f * k), new Color(0f, 0f, 0f, 0.72f));
+            var st = new GUIStyle(GUI.skin.label) { fontSize = Mathf.RoundToInt(13f * k), fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleLeft };
+            st.normal.textColor = Color.white;
+            float[] col = { 0.04f, 0.38f, 0.52f, 0.66f, 0.80f };
+            string[] head = { "Player", "K", "D", "A", "KDA" };
+            for (int c = 0; c < 5; c++) GUI.Label(new Rect(x0 + w * col[c], y0 + 4f * k, w * 0.2f, rowH), head[c], st);
+            for (int i = 0; i < m_Rank.Count; i++)
+            {
+                SpikeTank t = m_Rank[i]; m.TryGetKda(t.netId, out KdaSync v);
+                float y = y0 + 4f * k + rowH * (i + 1);
+                Fill(new Rect(x0 + 4f * k, y + 5f * k, 6f * k, rowH - 10f * k), SpikeMatch.TeamColors[SpikeMatch.TeamOf(t.netId)]);
+                st.normal.textColor = t == SpikeTank.Local ? Color.yellow : Color.white;
+                string[] cells = { (t.netId == m.winnerId && m.winner != -2 ? "WIN " : "") + "P" + t.netId + (t == SpikeTank.Local ? " (you)" : ""), v.k.ToString(), v.d.ToString(), v.a.ToString(), SpikeMatch.Ratio(v.k, v.d, v.a).ToString("0.00") };
+                for (int c = 0; c < 5; c++) GUI.Label(new Rect(x0 + w * col[c], y, w * 0.3f, rowH), cells[c], st);
             }
         }
     }

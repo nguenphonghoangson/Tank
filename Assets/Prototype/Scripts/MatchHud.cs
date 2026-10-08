@@ -26,6 +26,7 @@ namespace TankGame.Prototype
         Texture2D m_White, m_Disc;
         float m_FpsSmooth = 60f;
         readonly List<int> m_Order = new List<int>();
+        bool m_BoardOpen;    // tap the score bar to toggle the K/D/A board (the only way on touch, Tab still works on desktop)
 
         // ------------------------------------------------------------------ layout and input
 
@@ -42,6 +43,7 @@ namespace TankGame.Prototype
         void Update()
         {
             if (match == null || match.Players == null) return;
+            if (match.State != MatchManager.MatchState.Playing) m_BoardOpen = false;
             m_Layout = HudLayout.Compute(W, H, SafeVirtual(), Mobile);
             m_FpsSmooth = Mathf.Lerp(m_FpsSmooth, 1f / Mathf.Max(0.0001f, Time.unscaledDeltaTime), 0.05f);
 
@@ -69,6 +71,14 @@ namespace TankGame.Prototype
                 }
                 if (pressed && match.LocalOffers != null)
                     for (int i = 0; i < offers.Length; i++) if (CardRect(i).Contains(p)) { match.PickCore(i); break; }
+            }
+            else if (match.State == MatchManager.MatchState.Playing)
+            {
+                if (pressed)
+                {
+                    if (m_BoardOpen && BoardRect(m_Layout).Contains(p)) m_BoardOpen = false;
+                    else if (m_Layout.scoreBar.Contains(p)) m_BoardOpen = !m_BoardOpen;
+                }
             }
             else if (match.State == MatchManager.MatchState.Ended && pressed)
             {
@@ -106,7 +116,7 @@ namespace TankGame.Prototype
                 if (Mobile) DrawTouchControls(L);
                 DrawStats(L);
                 Keyboard kb = Keyboard.current;
-                if (!Mobile && kb != null && kb.tabKey.isPressed) DrawScoreboard(new Rect(W * 0.5f - 300f, 130f, 600f, 260f));
+                if (m_BoardOpen || (!Mobile && kb != null && kb.tabKey.isPressed)) DrawScoreboard(BoardRect(L));
                 if (!Mobile)
                     GUI.Label(new Rect(L.safe.x + 10f, L.safe.yMax - 24f, W - 40f, 20f), "WASD move   Mouse aim   LMB fire   R reload   Space dash   Tab scoreboard   F5 restart   M next mode", m_Tiny);
             }
@@ -464,6 +474,13 @@ namespace TankGame.Prototype
                 GUI.Label(b, i == 0 ? "PLAY AGAIN" : "NEXT MODE", new GUIStyle(m_Label) { alignment = TextAnchor.MiddleCenter, fontSize = 14 });
             }
             if (!Mobile) GUI.Label(new Rect(0f, H - 20f, W, 18f), "F5 play again   M next mode", m_Center);
+        }
+
+        Rect BoardRect(HudLayout L)
+        {
+            float w = Mathf.Min(600f, L.safe.width - 2f * HudLayout.Margin);
+            float h = Mathf.Min(L.safe.yMax - L.log.y - HudLayout.Margin, 24f + match.Players.Length * 20f + 12f);
+            return new Rect(W * 0.5f - w * 0.5f, L.log.y, w, h);
         }
 
         void DrawScoreboard(Rect r)

@@ -1,0 +1,39 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: ae640ccbf7d894efbadf52c2bb901954, type: 3}
+  m_Name: UiTheme
+  m_EditorClassIdentifier: Tank.Gameplay::Tank.Gameplay.UI.UiTheme
+  panelSmall: {fileID: 8586885197115800619, guid: 416ff9783a500412d8f7f2c6030ccfb0, type: 3}
+  panelLarge: {fileID: -9136572144232859775, guid: 416ff9783a500412d8f7f2c6030ccfb0, type: 3}
+  rounded: {fileID: 21300000, guid: 9a7d3b78c86304ae493b171e3d047ba8, type: 3}
+  square: {fileID: 21300000, guid: 4d9b6728ba9da4b3fba09690ba195ece, type: 3}
+  disc: {fileID: 21300000, guid: a937050e12f104a63a8b9154a0e22298, type: 3}
+  ring: {fileID: 21300000, guid: 441d2f2432c3c4e2e9bfecf4294bd5ad, type: 3}
+  vignette: {fileID: 21300000, guid: 154a8141d9ea44009979103b22ed72f9, type: 3}
+  iconHealth: {fileID: -6595680761151332689, guid: 416ff9783a500412d8f7f2c6030ccfb0, type: 3}
+  iconAmmo: {fileID: 7448113381798972013, guid: 416ff9783a500412d8f7f2c6030ccfb0, type: 3}
+  iconSpeed: {fileID: 7843416716369364892, guid: 416ff9783a500412d8f7f2c6030ccfb0, type: 3}
+  iconDamage: {fileID: 1602605247, guid: 416ff9783a500412d8f7f2c6030ccfb0, type: 3}
+  iconDash: {fileID: -604415608, guid: 416ff9783a500412d8f7f2c6030ccfb0, type: 3}
+  iconShield: {fileID: -273060469431498887, guid: 416ff9783a500412d8f7f2c6030ccfb0, type: 3}
+  iconKill: {fileID: 1602605247, guid: 416ff9783a500412d8f7f2c6030ccfb0, type: 3}
+  crown: {fileID: 21300000, guid: eca267b7cf7e8744d8785a4f41f71ff5, type: 3}
+  body: {fileID: 11400000, guid: da2cef8da0b448c4d976386eef72a142, type: 2}
+  heading: {fileID: 11400000, guid: d3092767d33128c4197814e2dfe6a92e, type: 2}
+  text: {r: 1, g: 1, b: 1, a: 1}
+  textMuted: {r: 1, g: 1, b: 1, a: 0.62}
+  panelTint: {r: 1, g: 1, b: 1, a: 0.94}
+  accent: {r: 1, g: 0.82, b: 0.2, a: 1}
+  good: {r: 0.4, g: 1, b: 0.5, a: 1}
+  bad: {r: 1, g: 0.3, b: 0.25, a: 1}
+  shield: {r: 0.35, g: 0.85, b: 1, a: 1}
+  highlight: {r: 1, g: 0.95, b: 0.5, a: 1}

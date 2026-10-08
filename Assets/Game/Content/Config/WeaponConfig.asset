@@ -1,0 +1,105 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 1834c74d698a64d809f64a413600ddf5, type: 3}
+  m_Name: WeaponConfig
+  m_EditorClassIdentifier: Tank.Gameplay::Tank.Gameplay.Config.WeaponConfig
+  weapons:
+  - name: CANNON
+    damage: 25
+    interval: 0.35
+    projectileSpeed: 40
+    range: 45
+    pellets: 1
+    spreadDegrees: 0
+    ammo: 0
+    splashRadius: 0
+    splashFactor: 0
+    projectilePrefab: {fileID: 5105814774093410073, guid: 8c8e46c53bc154dfd996dcf5983b81dc, type: 3}
+    muzzleVfx: {fileID: 2197313696358139040, guid: 9329259e86a5f470f8e39c4709dea879, type: 3}
+    impactVfx: {fileID: 7376065343667724482, guid: ae6365c52583749b2b6368722977face, type: 3}
+    shootSfx: {fileID: 11400000, guid: 3138adc8b71ff44f0a00b251cffbdcae, type: 2}
+    impactSfx: {fileID: 11400000, guid: 5a9bb17e7b07b473ea194723513fa18c, type: 2}
+  - name: MINIGUN
+    damage: 8
+    interval: 0.09
+    projectileSpeed: 55
+    range: 35
+    pellets: 1
+    spreadDegrees: 3.5
+    ammo: 45
+    splashRadius: 0
+    splashFactor: 0
+    projectilePrefab: {fileID: 6228536611612412030, guid: fe9fd62858ad94aada906c326aedb96b, type: 3}
+    muzzleVfx: {fileID: 6630716614193199048, guid: b3dd857666b2c4e508ae8945a574864e, type: 3}
+    impactVfx: {fileID: 1078632281664428504, guid: 33f4699e08911420e8583a0dcdebc82e, type: 3}
+    shootSfx: {fileID: 11400000, guid: b973b607736204aeca6e676d3805c587, type: 2}
+    impactSfx: {fileID: 11400000, guid: 5a9bb17e7b07b473ea194723513fa18c, type: 2}
+  - name: SHOTGUN
+    damage: 9
+    interval: 0.75
+    projectileSpeed: 32
+    range: 20
+    pellets: 7
+    spreadDegrees: 18
+    ammo: 7
+    splashRadius: 0
+    splashFactor: 0
+    projectilePrefab: {fileID: 3394049771600510827, guid: 20954fd0b1ad243a1b4df3227e426833, type: 3}
+    muzzleVfx: {fileID: 2197313696358139040, guid: 9329259e86a5f470f8e39c4709dea879, type: 3}
+    impactVfx: {fileID: 1078632281664428504, guid: 33f4699e08911420e8583a0dcdebc82e, type: 3}
+    shootSfx: {fileID: 11400000, guid: 3138adc8b71ff44f0a00b251cffbdcae, type: 2}
+    impactSfx: {fileID: 11400000, guid: 5a9bb17e7b07b473ea194723513fa18c, type: 2}
+  - name: ROCKET
+    damage: 55
+    interval: 1
+    projectileSpeed: 24
+    range: 50
+    pellets: 1
+    spreadDegrees: 0
+    ammo: 4
+    splashRadius: 4.5
+    splashFactor: 0.6
+    projectilePrefab: {fileID: 7895997917419105242, guid: 80524e64ac1fc409180f97f6c8d87db3, type: 3}
+    muzzleVfx: {fileID: 1775389767278427921, guid: f310e15168faf4cb78c0e779e6b92681, type: 3}
+    impactVfx: {fileID: 7164713725926462717, guid: 21c4a46c674ce424e80786f6fdbc4b6b, type: 3}
+    shootSfx: {fileID: 11400000, guid: 86fd2ba464498454aa2435c92d71876f, type: 2}
+    impactSfx: {fileID: 11400000, guid: 5d3743ee46cf846d68cd6fefda0bce3b, type: 2}
+  - name: GIGAVOLT
+    damage: 35
+    interval: 0.9
+    projectileSpeed: 110
+    range: 45
+    pellets: 1
+    spreadDegrees: 0
+    ammo: 5
+    splashRadius: 0
+    splashFactor: 0
+    projectilePrefab: {fileID: 7489904660952853915, guid: eb44d08be00114edd922b7141d0a8b41, type: 3}
+    muzzleVfx: {fileID: 3994930631707573497, guid: 6fc081d76c1674235b8c9a649cc6fbd0, type: 3}
+    impactVfx: {fileID: 5722920106291909812, guid: 8dd6cfeebb0c04cf6821e900ac467a13, type: 3}
+    shootSfx: {fileID: 11400000, guid: e7c06763b8eca4fc7a16b17567167d37, type: 2}
+    impactSfx: {fileID: 11400000, guid: 7c1d4905dd0e24bc1b3b80f09d97aa65, type: 2}
+  - name: GRENADE
+    damage: 40
+    interval: 1.2
+    projectileSpeed: 20
+    range: 26
+    pellets: 1
+    spreadDegrees: 0
+    ammo: 5
+    splashRadius: 3.5
+    splashFactor: 0.6
+    projectilePrefab: {fileID: 7752707353559465664, guid: 2255d0431c2d046108301d36b2a00fc0, type: 3}
+    muzzleVfx: {fileID: 1775389767278427921, guid: f310e15168faf4cb78c0e779e6b92681, type: 3}
+    impactVfx: {fileID: 7164713725926462717, guid: 21c4a46c674ce424e80786f6fdbc4b6b, type: 3}
+    shootSfx: {fileID: 11400000, guid: 86fd2ba464498454aa2435c92d71876f, type: 2}
+    impactSfx: {fileID: 11400000, guid: 5d3743ee46cf846d68cd6fefda0bce3b, type: 2}
